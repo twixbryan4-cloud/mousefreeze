@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.2.1
+-- Huss Valley Panel 0.3.0
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -42,7 +42,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.2.1", Config=cfg, Adapters=adapters}
+local API = {Version="0.3.0", Config=cfg, Adapters=adapters}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -293,7 +293,7 @@ local close=button(window,"x",12,{Name="Close",Position=UDim2.new(1,-34,0,8),Siz
 local quickButton=button(window,"UI",10,{Name="QuickUIButton",Position=UDim2.new(1,-94,0,8),Size=UDim2.fromOffset(25,23),BackgroundTransparency=1})
 local dragbar=create("Frame",{Name="DragBar",Position=UDim2.fromOffset(60,0),Size=UDim2.new(1,-166,0,34),BackgroundTransparency=1,Active=true},window)
 local body=create("Frame",{Name="Body",Position=UDim2.fromOffset(68,38),Size=UDim2.new(1,-82,1,-68),BackgroundTransparency=1},window)
-local footer=text(window,"HUSS VALLEY  /  v0.2.1",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
+local footer=text(window,"HUSS VALLEY  /  v0.3.0",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
 themed(footer,"TextColor3","muted")
 local fpsLabel=text(window,"-- FPS",9,{Name="FPS",Position=UDim2.new(1,-90,1,-23),Size=UDim2.fromOffset(72,14),TextXAlignment=Enum.TextXAlignment.Right})
 local floating=button(gui,"HV",13,{Name="FloatingButton",Position=UDim2.new(0,12,0.36,0),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
@@ -568,6 +568,7 @@ actionButton(c,"Aguardar meu hit",function() API.StartHitDiagnostics() end)
 actionButton(c,"Gravar 20s agora",function() API.StartHitDiagnostics(false) end)
 actionButton(c,"Encerrar e copiar",function() API.StopHitDiagnostics(true) end)
 actionButton(c,"Copiar ultimo registro",function() API.CopyHitDiagnostics() end)
+actionButton(c,"Gravar rodada inteira",function() API.StartGeneralDiagnostics() end)
 left,right=page("AI",3)
 pending(left,"Runner AI","runnerAI");pending(right,"Catcher AI","catcherAI")
 local info=card(left,"Huss Valley / integracao",nil,"O caminho do mapa, zonas seguras, equipes e controles precisam ser identificados dentro do jogo. Use o diagnostico para a proxima etapa.")
@@ -640,6 +641,27 @@ cycle(c,"Accent Color","accent",{"Peach","Purple","Blue","Pink","Green"});checkb
 customizeExpand()
 c=card(left,"Interface",nil);cycle(c,"Toggle Menu Key","toggleKey",{"RightShift","LeftAlt","Insert","F4"});checkbox(c,"Floating Logo Button","floating")
 actionButton(c,"Reset Position",function() window.Position=UDim2.fromScale(0.5,0.46);fit() end)
+do
+    local content=card(left,"Gravador geral",nil,"Grava ate 30 min, inclusive lobby e respawns. Use os marcadores logo apos cada acao. Ao terminar, copie as partes ou salve o JSON.")
+    API.DiagnosticStatus=text(content,"Status: parado",10,{Name="GeneralTraceStatus",TextWrapped=true,Size=UDim2.new(1,0,0,34)})
+    actionButton(content,"Iniciar gravacao geral",function() API.StartGeneralDiagnostics() end)
+    for _,label in ipairs({"Recebi hit","Cai","Matei","Zona","Revivi","Habilidade"}) do
+        actionButton(content,"Marcar: "..label,function() API.MarkDiagnostics(label) end)
+    end
+    actionButton(content,"Encerrar e copiar",function() API.StopHitDiagnostics(true) end)
+    actionButton(content,"Copiar proxima parte",function() API.CopyNextDiagnosticsPart() end)
+    actionButton(content,"Copiar tudo",function() API.CopyHitDiagnostics() end)
+    actionButton(content,"Salvar JSON",function() API.SaveDiagnostics() end)
+    API.TraceToolbar=create("Frame",{Name="TraceToolbar",AnchorPoint=Vector2.new(0.5,0),Position=UDim2.new(0.5,0,0,6),
+        Size=UDim2.new(0.72,0,0,56),BackgroundColor3=colors.card,BorderSizePixel=0,Visible=false,ZIndex=35},gui)
+    round(API.TraceToolbar,6)
+    create("UISizeConstraint",{MinSize=Vector2.new(260,56),MaxSize=Vector2.new(490,56)},API.TraceToolbar)
+    text(API.TraceToolbar,"GRAVANDO / marque logo apos a acao",9,{Position=UDim2.fromOffset(8,2),Size=UDim2.new(1,-16,0,17),ZIndex=36})
+    for i,item in ipairs({{"Hit","Recebi hit"},{"Cai","Cai"},{"Matei","Matei"},{"Zona","Zona"},{"Revivi","Revivi"},{"Habil.","Habilidade"},{"Parar"}}) do
+        local marker=button(API.TraceToolbar,item[1],9,{Name="TraceMarker"..i,Position=UDim2.new((i-1)/7,2,0,23),Size=UDim2.new(1/7,-4,0,27),ZIndex=36})
+        listen(marker.Activated,function() if item[2] then API.MarkDiagnostics(item[2]) else API.StopHitDiagnostics(true) end end)
+    end
+end
 local configs,configExpand=card(right,"Configs",nil,"Salva no executor quando ha acesso a arquivos; caso contrario, guarda apenas nesta sessao.")
 local configName=create("TextBox",{Name="ConfigName",Size=UDim2.new(1,0,0,27),Text="my-config",PlaceholderText="Config name",ClearTextOnFocus=false,
     BackgroundColor3=Color3.fromRGB(36,29,44),TextColor3=colors.text,TextSize=10,Font=Enum.Font.GothamMedium,BorderSizePixel=0},configs);round(configName,5)
@@ -648,7 +670,7 @@ actionButton(configs,"Save Config",function() API.SaveConfig(configName.Text) en
 actionButton(configs,"Load Config",function() API.LoadConfig(configName.Text) end)
 actionButton(configs,"Delete Config",function() API.DeleteConfig(configName.Text) end)
 checkbox(configs,"Auto-Load This Config On Launch","autoLoad");configExpand()
-local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.2.1")
+local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.3.0")
 actionButton(suite,"Rejoin Server",function() API.Rejoin() end)
 actionButton(suite,"Destroy Menu",function() API.Destroy() end)
 actionButton(suite,"Copiar diagnostico",function() API.ExportDiagnostics() end);suiteExpand()
@@ -1180,9 +1202,14 @@ function API.ExportDiagnostics()
     return presentDiagnostic(Http:JSONEncode(report),"Diagnostico copiado. Envie o texto para mapear as automacoes.")
 end
 
--- Short, explicitly started hit traces. Existing game handlers are never replaced.
-local hitTrace={current=nil,last=nil}
-local function traceValue(value,depth,seen)
+-- Explicitly started traces; every collector is disconnected when the session ends.
+local hitTrace={current=nil,last=nil,parts={},nextPart=1}
+local function traceClip(value,limit)
+    if #value<=limit then return value end
+    while limit>0 and string.byte(value,limit+1)>=128 and string.byte(value,limit+1)<192 do limit=limit-1 end
+    return string.sub(value,1,limit)
+end
+local function traceValue(value,depth,seen,gameStrings)
     local kind=typeof(value)
     seen._nodes=(seen._nodes or 0)+1
     if seen._nodes>64 then return {type=kind,truncated=true} end
@@ -1190,16 +1217,18 @@ local function traceValue(value,depth,seen)
     elseif kind=="boolean" then return value
     elseif kind=="number" then return value==value and math.abs(value)~=math.huge and value or "non-finite"
     elseif kind=="string" then
-        if #value>64 then return {type="string",length=#value} end
+        if #value>(gameStrings and 96 or 64) then return {type="string",length=#value} end
+        if gameStrings then return string.gsub(value,"[%c]","") end
         local lower=string.lower(value)
         if lower=="runner" or lower=="catcher" or lower=="chaser" or lower=="lobby" or lower=="playing" or lower=="alive" or lower=="spectating" or lower=="normal" then return value end
         for _,word in ipairs({"damage","hit","attack","melee","tackle","caught","capture","dead","death","kill","down","reviv","invul","immune","stun","knock","ragdoll","dodge","parry","block"}) do
-            if #value<=64 and lower:find(word,1,true) then return value:gsub("[%c]","") end
+            if #value<=64 and string.find(lower,word,1,true) then return string.gsub(value,"[%c]","") end
         end
         return {type="string",length=#value}
     elseif kind=="Instance" then
-        local ok,path=pcall(function() return value:GetFullName() end)
-        return {type="Instance",class=value.ClassName,path=ok and path:sub(1,200) or "unavailable"}
+        -- Dot calls preserve the pending __namecall method in the outbound observer.
+        local ok,path=pcall(function() return value.GetFullName(value) end)
+        return {type="Instance",class=value.ClassName,path=ok and traceClip(path,200) or "unavailable"}
     elseif kind=="Vector3" or kind=="Vector2" then return {type=kind,x=traceValue(value.X,3,{}),y=traceValue(value.Y,3,{}),z=kind=="Vector3" and traceValue(value.Z,3,{}) or nil}
     elseif kind=="CFrame" then return {type="CFrame",position=traceValue(value.Position,3,{})}
     elseif kind=="EnumItem" then return tostring(value)
@@ -1208,10 +1237,10 @@ local function traceValue(value,depth,seen)
         seen[value]=true;local out,count={},0
         for key,child in next,value do
             count=count+1;if count>12 then out.truncated=true;break end
-            local name=(type(key)=="string" or type(key)=="number") and tostring(key):sub(1,64) or "[key]"
+            local name=(type(key)=="string" or type(key)=="number") and traceClip(tostring(key),64) or "[key]"
             local lower=string.lower(name)
-            if lower:find("token",1,true) or lower:find("secret",1,true) or lower:find("password",1,true) or lower:find("auth",1,true) then out[name]="[redacted]"
-            else out[name]=traceValue(child,depth+1,seen) end
+            if string.find(lower,"token",1,true) or string.find(lower,"secret",1,true) or string.find(lower,"password",1,true) or string.find(lower,"auth",1,true) then out[name]="[redacted]"
+            else out[name]=traceValue(child,depth+1,seen,gameStrings) end
         end
         seen[value]=nil;return out
     end
@@ -1220,20 +1249,22 @@ end
 local function relevantAttribute(name)
     local lower=string.lower(name)
     if lower:find("token",1,true) or lower:find("secret",1,true) or lower:find("password",1,true) or lower:find("auth",1,true) then return false end
-    for _,part in ipairs({"health","damage","dead","alive","death","caught","captur","down","state","role","team","round","invul","immune","iframe","stun","knock","ragdoll"}) do
+    for _,part in ipairs({"health","damage","dead","alive","death","caught","captur","down","state","status","role","team","round","invul","immune","iframe","stun","knock","ragdoll","zone","safe","kill","dash","cooldown","ability","tackle","gem","coin","journey","vote","afk","map","reviv"}) do
         if lower:find(part,1,true) then return true end
     end
     return false
 end
-local function hitSnapshot()
+local function hitSnapshot(gameStrings)
     local char,hum,root=character();local sample={attributes={},features={}}
     if hum then sample.health=hum.Health;sample.maxHealth=hum.MaxHealth;sample.platformStand=hum.PlatformStand
         local ok,s=pcall(function() return hum:GetState() end);if ok then sample.humanoidState=tostring(s) end
     end
-    if root then sample.position=traceValue(root.Position,0,{}) end
+    if root then sample.position=traceValue(root.Position,0,{});sample.velocity=traceValue(root.AssemblyLinearVelocity,0,{}) end
+    sample.team=player.Team and player.Team.Name or "none"
+    local tool=char and char:FindFirstChildOfClass("Tool");if tool then sample.tool=traceValue(tool,0,{}) end
     for _,owner in ipairs({player,char}) do
         if owner then for key,value in pairs(owner:GetAttributes()) do
-            if relevantAttribute(key) then sample.attributes[(owner==player and "Player." or "Character.")..key]=traceValue(value,0,{}) end
+            if relevantAttribute(key) then sample.attributes[(owner==player and "Player." or "Character.")..key]=traceValue(value,0,{},gameStrings) end
         end end
     end
     for _,key in ipairs({"movement","speedBoost","fly","noclip","tpWalk","autoAttack","lockOn","antiHit"}) do sample.features[key]=cfg[key] end
@@ -1242,25 +1273,56 @@ end
 local function recordHitEvent(ctx,kind,data)
     if not ctx.active then return end
     ctx.report.eventsSeen=ctx.report.eventsSeen+1
-    local limit=ctx.waiting and 20 or 160
+    local limit=ctx.general and 600 or (ctx.waiting and 20 or 160)
     if #ctx.report.events>=limit then
         local remove=1
-        for i,event in ipairs(ctx.report.events) do if event.kind=="remote" then remove=i;break end end
+        for i,event in ipairs(ctx.report.events) do if event.kind=="remote" or (ctx.general and event.kind=="humanoidState") then remove=i;break end end
         table.remove(ctx.report.events,remove);ctx.report.eventsDropped=ctx.report.eventsDropped+1
     end
-    ctx.report.events[#ctx.report.events+1]={t=math.floor((os.clock()-ctx.started)*1000+0.5)/1000,kind=kind,data=data}
+    ctx.report.events[#ctx.report.events+1]={t=math.floor((os.clock()-ctx.started)*1000+0.5)/1000,seq=ctx.report.eventsSeen,kind=kind,data=data}
+end
+local function traceStatus(message)
+    if state.alive then hitStatus.Text=message;API.DiagnosticStatus.Text=message end
+end
+local function makeTraceParts(report)
+    local encoded=Http:JSONEncode(report)
+    hitTrace.encoded=encoded;hitTrace.parts={};hitTrace.nextPart=1
+    -- Split only between UTF-8 characters. Parts are labelled fragments of one JSON.
+    local start=1
+    repeat
+        local finish=math.min(start+8999,#encoded)
+        while finish<#encoded and encoded:byte(finish+1)>=128 and encoded:byte(finish+1)<192 do finish=finish-1 end
+        hitTrace.parts[#hitTrace.parts+1]=encoded:sub(start,finish);start=finish+1
+    until start>#encoded
+end
+function API.CopyNextDiagnosticsPart(index)
+    if not hitTrace.last then notify("Grave e encerre uma analise primeiro.");return false end
+    if not hitTrace.encoded then makeTraceParts(hitTrace.last) end
+    index=index or hitTrace.nextPart
+    if type(index)~="number" or index%1~=0 or index<1 or index>#hitTrace.parts then return false end
+    local total=#hitTrace.parts
+    hitTrace.nextPart=index%total+1
+    local header="[HUSS TRACE "..hitTrace.last.session.." | parte "..index.."/"..total.."]\n"
+    traceStatus("Copiada parte "..index.."/"..total.." | proxima: "..hitTrace.nextPart)
+    return presentDiagnostic(header..hitTrace.parts[index],"Parte "..index.."/"..total.." copiada. Envie aqui; depois copie a proxima.")
 end
 endHitTrace=function(reason,copy)
     local ctx=hitTrace.current
     if not ctx then return false end
     ctx.active=false;hitTrace.current=nil
+    if ctx.detachOutbound then ctx.report.outboundCleanup=ctx.detachOutbound();ctx.detachOutbound=nil end
     for _,connection in ipairs(ctx.connections) do connection:Disconnect() end
     for _,connection in ipairs(ctx.characterConnections) do connection:Disconnect() end
     ctx.report.duration=math.floor((os.clock()-ctx.started)*1000+0.5)/1000
-    ctx.report.reason=reason;ctx.report.final=hitSnapshot()
-    hitTrace.last=ctx.report;API.LastHitDiagnostics=ctx.report
-    if state.alive then hitStatus.Text="Analise encerrada | quedas de vida: "..ctx.report.healthDecreases end
-    if copy and state.alive then presentDiagnostic(Http:JSONEncode(ctx.report),"Analise de hits copiada. Envie o texto aqui.") end
+    ctx.report.reason=reason;ctx.report.final=hitSnapshot(ctx.general)
+    hitTrace.last=ctx.report;API.LastHitDiagnostics=ctx.report;API.LastGeneralDiagnostics=ctx.general and ctx.report or API.LastGeneralDiagnostics
+    hitTrace.encoded=nil;hitTrace.parts={};hitTrace.nextPart=1
+    traceStatus("Encerrado | "..#ctx.report.events.." registros | vida caiu: "..ctx.report.healthDecreases)
+    if API.TraceToolbar then API.TraceToolbar.Visible=false end
+    if copy and state.alive then
+        if ctx.general then makeTraceParts(ctx.report);API.CopyNextDiagnosticsPart(1)
+        else presentDiagnostic(Http:JSONEncode(ctx.report),"Analise de hits copiada. Envie o texto aqui.") end
+    end
     return ctx.report
 end
 local function triggerHitTrace(ctx,reason)
@@ -1285,19 +1347,95 @@ local function isHitAttribute(key,value,previous)
     end
     return false
 end
+local function generalRemote(path)
+    if path=="ReplicatedStorage.chrono.Shared.Remotes.Death" then return true end
+    local prefix="ReplicatedStorage.ChickenOrHero."
+    if path:sub(1,#prefix)~=prefix then return false end
+    for _,part in ipairs({".Admin.",".Audio.",".Bots.","Chat","PrivateInvite","PrivateServer","ChronoView","Snapshot"}) do
+        if path:find(part,1,true) then return false end
+    end
+    return true
+end
+local function observeOutbound(ctx,capture)
+    -- A detachable raw-metatable shim is used only when all required APIs exist.
+    -- It never calls FireServer/InvokeServer itself, and never edits their arguments.
+    if type(getrawmetatable)~="function" or type(getnamecallmethod)~="function" or type(setreadonly)~="function"
+        or type(isreadonly)~="function" or type(newcclosure)~="function" then return "unavailable" end
+    local function assign(mt,value)
+        local ok,locked=pcall(isreadonly,mt);if not ok then return false end
+        if not pcall(setreadonly,mt,false) then return false end
+        local written=pcall(function() mt.__namecall=value end)
+        local restored=pcall(setreadonly,mt,locked)
+        return written and restored
+    end
+    local slot=env.HussValleyTraceBridge
+    if type(slot)~="table" or not slot.installed then
+        local ok,mt=pcall(getrawmetatable,game)
+        if not ok or type(mt)~="table" or type(mt.__namecall)~="function" then return "unavailable" end
+        slot={metatable=mt,previous=mt.__namecall}
+        local methodName=getnamecallmethod
+        local wrapped,wrapper=pcall(newcclosure,function(self,...)
+            -- Fetch the method before any diagnostic work; use no yielding engine calls here.
+            local ok,method=pcall(methodName)
+            if ok and slot.handler and (method=="FireServer" or method=="InvokeServer") then
+                pcall(slot.handler,self,method,...)
+            end
+            return slot.previous(self,...)
+        end)
+        if not wrapped or type(wrapper)~="function" then return "unavailable" end
+        slot.wrapper=wrapper
+        if not assign(mt,wrapper) then
+            if mt.__namecall==wrapper then assign(mt,slot.previous) end
+            return "setupFailed"
+        end
+        slot.installed=true;env.HussValleyTraceBridge=slot
+    end
+    slot.handler=function(remote,method,...)
+        if ctx.active and ctx.remotePaths[remote] then
+            local ok=pcall(capture,remote,"out",method,...)
+            if not ok then ctx.report.collectorErrors=ctx.report.collectorErrors+1 end
+        end
+    end
+    ctx.detachOutbound=function()
+        -- A newer hook may chain ours: release the session, keeping an inert pass-through.
+        slot.handler=nil
+        if slot.metatable.__namecall==slot.wrapper and assign(slot.metatable,slot.previous) then
+            slot.installed=false
+            if env.HussValleyTraceBridge==slot then env.HussValleyTraceBridge=nil end
+            return "restored"
+        end
+        return "inactivePassThrough"
+    end
+    return slot.metatable.__namecall==slot.wrapper and "installed" or "chainReused"
+end
+function API.MarkDiagnostics(label)
+    local ctx=hitTrace.current
+    if not ctx or not ctx.general then notify("Inicie o gravador geral primeiro.");return false end
+    if type(label)~="string" then return false end
+    label=traceClip(label:gsub("[%c]",""),40)
+    recordHitEvent(ctx,"marker",{label=label,snapshot=hitSnapshot(true)})
+    traceStatus("Gravando | marcado: "..label)
+    return true
+end
+function API.StartGeneralDiagnostics() return API.StartHitDiagnostics("general") end
 function API.StartHitDiagnostics(waitForHit)
     if not state.alive then return false end
-    if hitTrace.current then notify("A analise de hits ja esta gravando. Aguarde ou use Encerrar e copiar.");return false end
-    local ctx={active=true,started=os.clock(),waiting=waitForHit~=false,connections={},characterConnections={},subscribed={}}
-    ctx.report={kind="HussValleyHitTrace",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
-        mode=ctx.waiting and "waitForLocalSignal" or "record20s",
-        initial=hitSnapshot(),events={},eventsSeen=0,eventsDropped=0,healthDecreases=0,observedRemotes={},missingRemotesAtStart={},
+    if hitTrace.current then notify("Ja existe uma gravacao. Use Encerrar e copiar antes de iniciar outra.");return false end
+    local ctx={active=true,started=os.clock(),general=waitForHit=="general",waiting=waitForHit~=false and waitForHit~="general",
+        connections={},characterConnections={},subscribed={},remotePaths={},remoteCount=0}
+    ctx.report={kind=ctx.general and "HussValleyGeneralTrace" or "HussValleyHitTrace",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
+        session=tostring(os.time()).."-"..tostring(math.random(100000,999999)),
+        mode=ctx.general and "round30m" or (ctx.waiting and "waitForLocalSignal" or "record20s"),
+        initial=hitSnapshot(ctx.general),events={},eventsSeen=0,eventsDropped=0,healthDecreases=0,observedRemotes={},missingRemotesAtStart={},
         capabilities={getconnections=type(getconnections)=="function",decompile=type(decompile)=="function",getscriptbytecode=type(getscriptbytecode)=="function"},
-        note="Observacao do cliente; proximidade temporal nao prova a causa do dano nem acesso a logica do servidor."}
+        remoteStats={},initialStats={},observedValues={},collectorErrors=0,
+        note="Observacao do cliente; eventos recebidos podem se referir a outros jogadores. Marcadores sao relatos do usuario; zoneContact e apenas uma pista. O registro nao contem logica do servidor."}
     hitTrace.current=ctx
     local function attach(signal,fn,bucket)
         bucket=bucket or ctx.connections
-        bucket[#bucket+1]=signal:Connect(function(...) if ctx.active then fn(...) end end)
+        bucket[#bucket+1]=signal:Connect(function(...)
+            if ctx.active then local ok=pcall(fn,...);if not ok then ctx.report.collectorErrors=ctx.report.collectorErrors+1 end end
+        end)
     end
     local function watchCharacter(char)
         for _,connection in ipairs(ctx.characterConnections) do connection:Disconnect() end
@@ -1317,7 +1455,7 @@ function API.StartHitDiagnostics(waitForHit)
             if value<last then ctx.report.healthDecreases=ctx.report.healthDecreases+1;triggerHitTrace(ctx,"healthDecreased") end
             recordHitEvent(ctx,"health",{previous=last,current=value});last=value
         end,ctx.characterConnections)
-        attach(hum.Died,function() triggerHitTrace(ctx,"humanoidDied");recordHitEvent(ctx,"died",hitSnapshot()) end,ctx.characterConnections)
+        attach(hum.Died,function() triggerHitTrace(ctx,"humanoidDied");recordHitEvent(ctx,"died",hitSnapshot(ctx.general)) end,ctx.characterConnections)
         attach(hum.StateChanged,function(old,new)
             recordHitEvent(ctx,"humanoidState",{previous=tostring(old),current=tostring(new)})
         end,ctx.characterConnections)
@@ -1325,45 +1463,140 @@ function API.StartHitDiagnostics(waitForHit)
             if relevantAttribute(key) then
                 local value,previous=char:GetAttribute(key),attributes[key];attributes[key]=value
                 if isHitAttribute(key,value,previous) then triggerHitTrace(ctx,"characterAttribute:"..key) end
-                recordHitEvent(ctx,"attribute",{owner="Character",name=key,previous=traceValue(previous,0,{}),value=traceValue(value,0,{})})
+                recordHitEvent(ctx,"attribute",{owner="Character",name=key,previous=traceValue(previous,0,{},ctx.general),value=traceValue(value,0,{},ctx.general)})
             end
         end,ctx.characterConnections)
+        if ctx.general then
+            local watched={};local contacts=setmetatable({},{__mode="k"})
+            local function watchPart(object)
+                if watched[object] then return end
+                if object:IsA("Tool") then
+                    watched[object]=true
+                    attach(object.Activated,function() recordHitEvent(ctx,"toolActivated",{tool=traceValue(object,0,{})}) end,ctx.characterConnections)
+                elseif object.Name=="HumanoidRootPart" and object:IsA("BasePart") then
+                    watched[object]=true
+                    attach(object.Touched,function(part)
+                        if not part or part:IsDescendantOf(char) then return end
+                        local path=part:GetFullName();local lower=string.lower(path)
+                        if not (lower:find("zone",1,true) or lower:find("safe",1,true) or lower:find("finish",1,true) or lower:find("checkpoint",1,true)) then return end
+                        local now=os.clock();if contacts[part] and now-contacts[part]<2 then return end;contacts[part]=now
+                        recordHitEvent(ctx,"zoneContact",{part=traceValue(part,0,{}),position=traceValue(part.Position,0,{}),size=traceValue(part.Size,0,{}),snapshot=hitSnapshot(true)})
+                    end,ctx.characterConnections)
+                end
+            end
+            for _,object in ipairs(char:GetDescendants()) do watchPart(object) end
+            attach(char.DescendantAdded,watchPart,ctx.characterConnections)
+        end
     end
     local playerAttributes=player:GetAttributes()
     attach(player.AttributeChanged,function(key)
         if relevantAttribute(key) then
             local value,previous=player:GetAttribute(key),playerAttributes[key];playerAttributes[key]=value
             if isHitAttribute(key,value,previous) then triggerHitTrace(ctx,"playerAttribute:"..key) end
-            recordHitEvent(ctx,"attribute",{owner="Player",name=key,previous=traceValue(previous,0,{}),value=traceValue(value,0,{})})
+            recordHitEvent(ctx,"attribute",{owner="Player",name=key,previous=traceValue(previous,0,{},ctx.general),value=traceValue(value,0,{},ctx.general)})
         end
     end)
     attach(player.CharacterAdded,function(char) recordHitEvent(ctx,"respawn",{});watchCharacter(char) end)
+    if ctx.general then attach(player:GetPropertyChangedSignal("Team"),function() recordHitEvent(ctx,"team",hitSnapshot(true)) end) end
     watchCharacter(player.Character)
     local paths={"chrono.Shared.Remotes.Death","ChickenOrHero.Game.GameAction","ChickenOrHero.Game.MeleeEvent",
         "ChickenOrHero.Game.HitReplayEvent","ChickenOrHero.Game.RescueEvent","ChickenOrHero.Game.TeamEventRemote",
         "ChickenOrHero.Presentation.MovementGuardEvent"}
     local wanted={};for _,path in ipairs(paths) do wanted["ReplicatedStorage."..path]=true end
-    local function subscribe(remote)
-        if ctx.subscribed[remote] or not (remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent")) then return end
-        local path=remote:GetFullName();if not wanted[path] then return end
-        ctx.subscribed[remote]=true;ctx.report.observedRemotes[#ctx.report.observedRemotes+1]=path
-        local lastSample=-math.huge
-        attach(remote.OnClientEvent,function(...)
-            local now=os.clock()
-            if ctx.waiting and now-lastSample<0.25 then return end
-            lastSample=now
-            local args=table.pack(...);local data={remote=path,argumentCount=args.n,arguments={}}
-            local seen={};for i=1,math.min(args.n,8) do data.arguments[i]=traceValue(args[i],0,seen) end
-            recordHitEvent(ctx,"remote",data)
-        end)
+    local function capture(remote,direction,method,...)
+        local path=ctx.remotePaths[remote];if not path then return end
+        local key=direction..":"..path
+        local stats=ctx.report.remoteStats[key]
+        if not stats then stats={calls=0,sampled=0,suppressed=0};ctx.report.remoteStats[key]=stats end
+        stats.calls=stats.calls+1
+        local now=os.clock()
+        if ctx.general then
+            local sample=ctx.subscribed[remote][direction]
+            if not sample or now-sample.start>=1 then sample={start=now,count=0};ctx.subscribed[remote][direction]=sample end
+            if sample.count>=(direction=="out" and 8 or 4) then stats.suppressed=stats.suppressed+1;return end
+            sample.count=sample.count+1
+        elseif ctx.waiting then
+            local last=ctx.subscribed[remote].last or -math.huge
+            if now-last<0.25 then stats.suppressed=stats.suppressed+1;return end
+            ctx.subscribed[remote].last=now
+        end
+        local args=table.pack(...);local data={remote=path,direction=direction,method=method,argumentCount=args.n,arguments={}}
+        local seen={};for i=1,math.min(args.n,8) do data.arguments[i]=traceValue(args[i],0,seen,ctx.general) end
+        if args.n>8 then data.argumentsTruncated=true end
+        stats.sampled=stats.sampled+1;recordHitEvent(ctx,"remote",data)
     end
-    for _,path in ipairs(paths) do
-        local object=Replicated
-        for segment in path:gmatch("[^%.]+") do object=object and object:FindFirstChild(segment) end
-        if object then subscribe(object) else ctx.report.missingRemotesAtStart[#ctx.report.missingRemotesAtStart+1]="ReplicatedStorage."..path end
+    local function subscribe(remote)
+        if ctx.subscribed[remote] or ctx.remoteCount>=160 or not (remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent") or (ctx.general and remote:IsA("RemoteFunction"))) then return end
+        local path=remote:GetFullName();if not (ctx.general and generalRemote(path) or not ctx.general and wanted[path]) then return end
+        ctx.subscribed[remote]={};ctx.remotePaths[remote]=path;ctx.remoteCount=ctx.remoteCount+1
+        ctx.report.observedRemotes[#ctx.report.observedRemotes+1]=path
+        if not remote:IsA("RemoteFunction") then attach(remote.OnClientEvent,function(...) capture(remote,"in","OnClientEvent",...) end) end
+    end
+    local initialObjects=ctx.general and Replicated:GetDescendants() or {}
+    if ctx.general then
+        for _,object in ipairs(initialObjects) do subscribe(object) end
+    else
+        for _,path in ipairs(paths) do
+            local object=Replicated
+            for segment in path:gmatch("[^%.]+") do object=object and object:FindFirstChild(segment) end
+            if object then subscribe(object) else ctx.report.missingRemotesAtStart[#ctx.report.missingRemotesAtStart+1]="ReplicatedStorage."..path end
+        end
     end
     attach(Replicated.DescendantAdded,subscribe)
-    if ctx.waiting then
+    if ctx.general then
+        local watchedValues,watchedFolders={},{}
+        local valueCount=0
+        local function watchValue(object,localStat)
+            if watchedValues[object] or valueCount>=100 or not object:IsA("ValueBase") then return end
+            local path=object:GetFullName()
+            if not localStat and not (generalRemote(path) and relevantAttribute(object.Name)) then return end
+            local name=string.lower(object.Name)
+            for _,word in ipairs({"token","secret","password","auth"}) do if name:find(word,1,true) then return end end
+            watchedValues[object]=true;valueCount=valueCount+1
+            local last=traceValue(object.Value,0,{},true)
+            ctx.report.initialStats[path]=last;ctx.report.observedValues[#ctx.report.observedValues+1]=path
+            attach(object:GetPropertyChangedSignal("Value"),function()
+                local value=traceValue(object.Value,0,{},true)
+                recordHitEvent(ctx,"stat",{path=path,previous=last,value=value});last=value
+            end)
+        end
+        local function watchFolder(folder)
+            if watchedFolders[folder] then return end;watchedFolders[folder]=true
+            for _,object in ipairs(folder:GetDescendants()) do watchValue(object,true) end
+            attach(folder.DescendantAdded,function(object) watchValue(object,true) end)
+        end
+        local stats=player:FindFirstChild("leaderstats");if stats then watchFolder(stats) end
+        attach(player.ChildAdded,function(object) if object.Name=="leaderstats" then watchFolder(object) end end)
+        local function watchReplicated(object)
+            watchValue(object,false)
+            local path=object:GetFullName()
+            if watchedFolders[object] or not (path=="ReplicatedStorage.ChickenOrHero" or path=="ReplicatedStorage.ChickenOrHero.Game") then return end
+            watchedFolders[object]=true
+            local attributes=object:GetAttributes()
+            for name,value in pairs(attributes) do if relevantAttribute(name) then ctx.report.initialStats[path.."@"..name]=traceValue(value,0,{},true) end end
+            attach(object.AttributeChanged,function(name)
+                if relevantAttribute(name) then
+                    local value,previous=object:GetAttribute(name),attributes[name];attributes[name]=value
+                    recordHitEvent(ctx,"attribute",{owner=path,name=name,previous=traceValue(previous,0,{},true),value=traceValue(value,0,{},true)})
+                end
+            end)
+        end
+        for _,object in ipairs(initialObjects) do watchReplicated(object) end
+        attach(Replicated.DescendantAdded,watchReplicated)
+        local ok,promptService=pcall(function() return game:GetService("ProximityPromptService") end)
+        ctx.report.capabilities.promptObserver=ok and promptService~=nil
+        if ok and promptService then attach(promptService.PromptTriggered,function(prompt,who)
+            if who==player then recordHitEvent(ctx,"prompt",{prompt=traceValue(prompt,0,{}),action=traceValue(prompt.ActionText,0,{},true),snapshot=hitSnapshot(true)}) end
+        end) end
+        ctx.report.capabilities.outbound=observeOutbound(ctx,capture)
+        ctx.report.limits={events=600,inboundPerRemotePerSecond=4,outboundPerRemotePerSecond=8,remotes=160,values=100,maxSeconds=1800,
+            maxArguments=8,tableDepth=3,tableFields=12,valueNodes=64,stringBytes=96}
+        ctx.report.excluded="Chat, private/admin, audio/bots and high-frequency replication; RemoteFunction callbacks and direct-dot remote calls are not intercepted."
+        traceStatus("Gravando rodada | ate 30 min | saida: "..ctx.report.capabilities.outbound)
+        API.TraceToolbar.Visible=true
+        notify("Gravador geral iniciado. Marque suas acoes na barra superior e use Parar ao terminar.")
+        task.delay(1800,function() if state.alive and hitTrace.current==ctx then endHitTrace("generalTimeout",true) end end)
+    elseif ctx.waiting then
         hitStatus.Text="Aguardando seu hit | limite: 15 min"
         notify("Analise armada. Jogue normalmente; ela aguarda um sinal de dano/captura por ate 15 minutos.")
         task.delay(900,function() if state.alive and hitTrace.current==ctx and ctx.waiting then endHitTrace("waitTimeout",true) end end)
@@ -1380,8 +1613,18 @@ function API.StopHitDiagnostics(copy)
     return result
 end
 function API.CopyHitDiagnostics()
-    if not hitTrace.last then notify("Grave uma analise de hits primeiro.");return false end
-    return presentDiagnostic(Http:JSONEncode(hitTrace.last),"Analise de hits copiada. Envie o texto aqui.")
+    if not hitTrace.last then notify("Grave e encerre uma analise primeiro.");return false end
+    return presentDiagnostic(hitTrace.encoded or Http:JSONEncode(hitTrace.last),"Registro completo copiado. Envie o texto aqui.")
+end
+function API.SaveDiagnostics()
+    if not hitTrace.last then notify("Encerre a gravacao primeiro.");return false end
+    if type(writefile)~="function" then notify("Este executor nao permite salvar arquivos. Use as partes copiadas.");return false end
+    if not hitTrace.encoded then makeTraceParts(hitTrace.last) end
+    local filename="huss-valley-trace-"..hitTrace.last.session..".json"
+    local ok=pcall(writefile,filename,hitTrace.encoded)
+    if not ok then notify("Nao foi possivel salvar. Use as partes copiadas.");return false end
+    notify("Salvo no executor: "..filename)
+    return filename
 end
 end
 
