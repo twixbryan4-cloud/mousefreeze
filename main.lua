@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.1.0
+-- Huss Valley Panel 0.2.0
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -25,27 +25,47 @@ local defaults = {
     autoRevive=false, autoPick=false, promptDelay=0.6,
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
     autoAbility=false, runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
-    autoVote=false, disableGameAFK=false, antiIdle=false,
+    autoVote=false, disableGameAFK=false, antiIdle=false, antiHit=false,
     esp=false, boxes=true, names=true, tracers=false, health=true, distance=true,
     skeleton=false, headDot=false, healthText=false, roleColors=true, teamFilter=false,
-    espRange=1500, espRate=10, chams=false, viewTracer=false, nameHider=false, headless=false,
+    espRange=1500, espRate=15, smoothESP=true, chams=false, viewTracer=false, nameHider=false, headless=false,
     hitbox=false, leaderboard=false, gems=false,
     fpsBoost=false, removeTextures=true, removeDecals=true, removeParticles=true,
     lowDetail=true, noShadows=true, noFog=true, removeAccessories=false,
     unlockFPS=false, fpsCap=120, lowQuality=false,
-    uiScale=1, opacity=0.94, theme="Dark", accent="Peach", rainbow=false,
-    sounds=false, floating=true, toggleKey="RightShift", autoLoad=false,
+    uiScale=1, opacity=0.94, transparency=6, theme="Dark", accent="Peach", rainbow=false,
+    sounds=false, notifications=true, floating=true, toggleKey="RightShift", autoLoad=false,
 }
 local cfg = {}
 for key,value in pairs(defaults) do cfg[key]=value end
 local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}, {}, {}, {}
+local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.1.0", Config=cfg, Adapters=adapters}
+local API = {Version="0.2.0", Config=cfg, Adapters=adapters}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
 end
+-- Every slider and drag handle shares one global pointer dispatcher.
+local pointerSessions={}
+local function beginPointer(input,onMove,onEnd)
+    pointerSessions[input]={move=onMove,finish=onEnd}
+    onMove(input)
+end
+listen(Input.InputChanged,function(input)
+    local session=pointerSessions[input]
+    if session then session.move(input)
+    elseif input.UserInputType==Enum.UserInputType.MouseMovement then
+        for pointer,s in pairs(pointerSessions) do
+            if pointer.UserInputType==Enum.UserInputType.MouseButton1 then s.move(input) end
+        end
+    end
+end)
+listen(Input.InputEnded,function(input)
+    local session=pointerSessions[input];pointerSessions[input]=nil
+    if session and session.finish then session.finish(input) end
+end)
 local function create(class,props,parent)
     local object=Instance.new(class)
     for key,value in pairs(props or {}) do object[key]=value end
@@ -62,24 +82,55 @@ local palette = {Peach=Color3.fromRGB(244,157,143),Purple=Color3.fromRGB(168,135
 local accent = palette.Peach
 local colors={bg=Color3.fromRGB(16,14,23),card=Color3.fromRGB(27,23,36),text=Color3.fromRGB(235,232,240),muted=Color3.fromRGB(147,140,158)}
 local themes, accentItems = {}, {}
+local function pageOf(object)
+    local p=object.Parent
+    while p do
+        local entry=pages[p.Name]
+        if entry and entry.root==p then return p end
+        p=p.Parent
+    end
+end
+local function surface(object,base)
+    menuSurfaces[#menuSurfaces+1]={object=object,base=base,page=pageOf(object)}
+end
+local function applyAppearance()
+    local alpha=cfg.transparency/100
+    for _,entry in ipairs(menuSurfaces) do
+        if entry.object.Parent and (not entry.page or entry.page.Visible) then
+            entry.object.BackgroundTransparency=entry.base+(1-entry.base)*alpha
+        end
+    end
+    uiDirty=false
+end
 local function themed(object,property,role)
     themes[#themes+1]={object,property,role}; object[property]=colors[role]; return object
 end
 local function accented(object,property)
-    accentItems[#accentItems+1]={object,property}; object[property]=accent; return object
+    accentItems[#accentItems+1]={object,property,pageOf(object)}; object[property]=accent; return object
 end
-local function text(parent,value,size,props)
+local function text(parent,value,size,props,untracked)
     local p={Text=value,TextSize=size or 12,Font=Enum.Font.GothamMedium,TextColor3=colors.text,
         BackgroundTransparency=1,BorderSizePixel=0,TextXAlignment=Enum.TextXAlignment.Left,
         Size=UDim2.new(1,0,0,20)}
     for k,v in pairs(props or {}) do p[k]=v end
-    return themed(create("TextLabel",p,parent),"TextColor3","text")
+    local label=create("TextLabel",p,parent)
+    if untracked then return label end
+    themed(label,"TextColor3","text")
+    local page=pageOf(label);if page then pages[page.Name].texts[#pages[page.Name].texts+1]=label end
+    return label
 end
 local function button(parent,value,size,props)
     local p={Text=value,TextSize=size or 12,Font=Enum.Font.GothamMedium,TextColor3=colors.text,
         BackgroundColor3=colors.card,BorderSizePixel=0,AutoButtonColor=false,Size=UDim2.new(1,0,0,28)}
     for k,v in pairs(props or {}) do p[k]=v end
-    local b=create("TextButton",p,parent); round(b,5); themed(b,"TextColor3","text"); themed(b,"BackgroundColor3","card"); return b
+    local b=create("TextButton",p,parent); round(b,5); themed(b,"TextColor3","text"); themed(b,"BackgroundColor3","card")
+    local page=pageOf(b);if page then pages[page.Name].texts[#pages[page.Name].texts+1]=b end
+    local ancestor=parent
+    while ancestor do
+        if ancestor.Name=="Window" then if (p.BackgroundTransparency or 0)<1 then surface(b,p.BackgroundTransparency or 0) end;break end
+        ancestor=ancestor.Parent
+    end
+    return b
 end
 
 local gui=create("ScreenGui",{Name="HussValleyPanel",ResetOnSpawn=false,IgnoreGuiInset=true,
@@ -103,16 +154,27 @@ local bootFill=accented(create("Frame",{Size=UDim2.fromScale(0.1,1),BorderSizePi
 local function bootProgress(value,message) bootFill.Size=UDim2.fromScale(value,1);bootStatus.Text=message end
 local visuals=create("Folder",{Name="HussValleyLocalVisuals"},workspace)
 local overlay=create("Frame",{Name="ESP",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},gui)
-local toast=text(gui,"",12,{Name="Notice",AnchorPoint=Vector2.new(0.5,1),Position=UDim2.new(0.5,0,1,-18),
-    Size=UDim2.new(0.85,0,0,44),BackgroundColor3=colors.card,BackgroundTransparency=0.05,
-    TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Center,Visible=false,ZIndex=50})
+local toast=text(gui,"",11,{Name="Notice",AnchorPoint=Vector2.new(1,1),Position=UDim2.new(1,-14,1,-18),
+    Size=UDim2.fromOffset(300,58),BackgroundColor3=colors.card,BackgroundTransparency=0.05,
+    TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,Visible=false,ZIndex=50})
 round(toast,7)
+create("UISizeConstraint",{MaxSize=Vector2.new(300,58),MinSize=Vector2.new(120,58)},toast)
+create("UIPadding",{PaddingLeft=UDim.new(0,15),PaddingRight=UDim.new(0,12)},toast)
+local toastLine=accented(create("Frame",{Size=UDim2.new(0,3,1,-14),Position=UDim2.fromOffset(0,7),BorderSizePixel=0},toast),"BackgroundColor3")
+local toastProgress=accented(create("Frame",{Name="Progress",Position=UDim2.new(0,10,1,-3),Size=UDim2.new(1,-20,0,2),BorderSizePixel=0},toast),"BackgroundColor3")
 local toastID=0
-local function notify(message)
+local function notify(message,kind)
     if not state.alive then return end
     toastID=toastID+1; local id=toastID
-    toast.Text=message; toast.Visible=true
-    task.delay(4,function() if state.alive and id==toastID then toast.Visible=false end end)
+    local wasVisible=toast.Visible
+    toast.Text=message; toast.Visible=true;toastLine.BackgroundColor3=kind=="off" and colors.muted or accent
+    if not wasVisible then toast.Position=UDim2.new(1,310,1,-18) end
+    tween(toast,{Position=UDim2.new(1,-14,1,-18)},0.16)
+    toastProgress.Size=UDim2.new(1,-20,0,2);tween(toastProgress,{Size=UDim2.new(0,0,0,2)},2.7)
+    task.delay(2.7,function() if state.alive and id==toastID then
+        tween(toast,{Position=UDim2.new(1,310,1,-18)},0.14)
+        task.delay(0.15,function() if state.alive and id==toastID then toast.Visible=false end end)
+    end end)
 end
 API.Notify=notify
 local tooltip=text(gui,"",10,{Name="Tooltip",Size=UDim2.fromOffset(235,80),BackgroundColor3=colors.card,
@@ -143,21 +205,30 @@ local function restore(group)
     end
     originals[group]=nil
 end
+local actorCache=setmetatable({},{__mode="k"})
+local function actor(p)
+    local char=p.Character;local a=actorCache[p]
+    if not a or a.char~=char then a={char=char};actorCache[p]=a end
+    if char then
+        if not a.hum or not a.hum.Parent then a.hum=char:FindFirstChildOfClass("Humanoid") end
+        if not a.root or not a.root.Parent then a.root=char:FindFirstChild("HumanoidRootPart") end
+    end
+    return a
+end
 local function character()
-    local char=player.Character
-    return char, char and char:FindFirstChildOfClass("Humanoid"), char and char:FindFirstChild("HumanoidRootPart")
+    local a=actor(player);return a.char,a.hum,a.root
 end
 local function watch(key,fn)
     watchers[key]=watchers[key] or {}; table.insert(watchers[key],fn); fn(cfg[key])
 end
-local set,refreshTheme,fit,updateFlight,refreshPerformance,refreshPreview
+local set,refreshTheme,refreshAccent,fit,updateFlight,refreshPerformance,refreshPreview
 local requiresAdapter={autoDash="AutoDash",autoZone="AutoZone",autoDown="AutoDown",autoTackle="AutoTackle",
     dashCooldown="DashCooldown",autoAbility="AutoAbility",runnerAI="RunnerAI",catcherAI="CatcherAI",
     autoWheel="AutoSpinWheel",autoJourney="AutoClaimJourney",autoVote="AutoMapVote",disableGameAFK="DisableGameAFK",
-    hitbox="HitBox",leaderboard="LeaderboardVisuals",gems="GemsAndCoins"}
+    hitbox="HitBox",leaderboard="LeaderboardVisuals",gems="GemsAndCoins",antiHit="AntiHit"}
 local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
     prediction={0,0.5},aimSmooth={1,25},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
-    promptDelay={0.25,3},espRange={50,3000},espRate={2,20},fpsCap={30,240},uiScale={0.65,1.4},opacity={0.5,1}}
+    promptDelay={0.25,3},espRange={50,3000},espRate={2,30},fpsCap={30,240},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85}}
 local function valid(key,value)
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
     if type(value)=="number" then
@@ -174,7 +245,7 @@ end
 set=function(key,value,quiet)
     local ok,newValue=valid(key,value); if not ok then return false end
     if newValue==true and requiresAdapter[key] and type(adapters[requiresAdapter[key]])~="function" then
-        if not quiet then notify("Essa funcao precisa ser integrada ao Huss Valley. Use Config > Copiar diagnostico.") end
+        if not quiet then notify(key=="antiHit" and "Anti-Hit ainda nao validado: falta confirmar como o servidor aplica os hits." or "Essa funcao ainda precisa de integracao com o Huss Valley.") end
         return false
     end
     if key=="unlockFPS" and newValue and type(setfpscap)~="function" then notify("Esta versao do executor nao fornece setfpscap."); return false end
@@ -189,6 +260,12 @@ set=function(key,value,quiet)
             pcall(actions[key],cfg[key]); notify("Nao foi possivel aplicar: "..key); warn("[HV] "..tostring(err)); return false
         end
     end
+    if not quiet then
+        if type(newValue)=="boolean" and (cfg.notifications or key=="notifications") then
+            notify((optionLabels[key] or key)..(newValue and " ativado" or " desativado"),newValue and "on" or "off")
+        end
+        if type(newValue)=="boolean" and cfg.sounds and API.PlaySound then API.PlaySound() end
+    end
     return true
 end
 API.Set=set
@@ -201,19 +278,22 @@ end
 local window=themed(create("Frame",{Name="Window",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.46),
     Size=UDim2.fromOffset(730,438),BackgroundTransparency=1-cfg.opacity,BorderSizePixel=0,ClipsDescendants=true},gui),"BackgroundColor3","bg")
 round(window,11)
+surface(window,0)
 local scale=create("UIScale",{Scale=1},window)
 local border=create("UIStroke",{Color=Color3.fromRGB(65,52,70),Thickness=1,Transparency=0.25},window)
 create("UIGradient",{Rotation=32,Color=ColorSequence.new(Color3.fromRGB(255,255,255),Color3.fromRGB(180,167,205))},window)
 local rail=themed(create("Frame",{Name="Sidebar",Size=UDim2.new(0,54,1,0),BorderSizePixel=0,BackgroundTransparency=0.3},window),"BackgroundColor3","card")
+surface(rail,0.3)
 local brand=button(rail,"HV",13,{Name="Brand",Size=UDim2.fromOffset(32,30),Position=UDim2.fromOffset(11,12),Font=Enum.Font.GothamBold})
 accented(brand,"TextColor3")
 local heading=text(window,"02 / COMBAT",10,{Name="PageTitle",Position=UDim2.fromOffset(70,13),Size=UDim2.new(1,-200,0,16),Font=Enum.Font.GothamBold})
 themed(heading,"TextColor3","muted")
 local minimize=button(window,"-",17,{Name="Minimize",Position=UDim2.new(1,-62,0,8),Size=UDim2.fromOffset(23,23),BackgroundTransparency=1})
 local close=button(window,"x",12,{Name="Close",Position=UDim2.new(1,-34,0,8),Size=UDim2.fromOffset(23,23),BackgroundTransparency=1})
-local dragbar=create("Frame",{Name="DragBar",Position=UDim2.fromOffset(60,0),Size=UDim2.new(1,-130,0,34),BackgroundTransparency=1,Active=true},window)
+local quickButton=button(window,"UI",10,{Name="QuickUIButton",Position=UDim2.new(1,-94,0,8),Size=UDim2.fromOffset(25,23),BackgroundTransparency=1})
+local dragbar=create("Frame",{Name="DragBar",Position=UDim2.fromOffset(60,0),Size=UDim2.new(1,-166,0,34),BackgroundTransparency=1,Active=true},window)
 local body=create("Frame",{Name="Body",Position=UDim2.fromOffset(68,38),Size=UDim2.new(1,-82,1,-68),BackgroundTransparency=1},window)
-local footer=text(window,"HUSS VALLEY  /  v0.1.0",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
+local footer=text(window,"HUSS VALLEY  /  v0.2.0",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
 themed(footer,"TextColor3","muted")
 local fpsLabel=text(window,"-- FPS",9,{Name="FPS",Position=UDim2.new(1,-90,1,-23),Size=UDim2.fromOffset(72,14),TextXAlignment=Enum.TextXAlignment.Right})
 local floating=button(gui,"HV",13,{Name="FloatingButton",Position=UDim2.new(0,12,0.36,0),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
@@ -227,26 +307,26 @@ fit=function()
     scale.Scale=math.max(0.25,math.min((size.X-24)/730,(size.Y-32)/438,1.1)*cfg.uiScale)
     -- User scaling may not push the panel outside the screen.
     scale.Scale=math.min(scale.Scale,(size.X-16)/730,(size.Y-24)/438)
+    local halfW,halfH=365*scale.Scale,219*scale.Scale
+    window.Position=UDim2.fromOffset(math.clamp(window.Position.X.Scale*size.X+window.Position.X.Offset,halfW,size.X-halfW),
+        math.clamp(window.Position.Y.Scale*size.Y+window.Position.Y.Offset,halfH,size.Y-halfH))
+    toast.Size=UDim2.fromOffset(math.min(300,math.max(120,size.X-28)),58)
 end
 local function show(value)
     state.visible=value; window.Visible=value
     tooltip.Visible=false
     floating.Visible=cfg.floating or not value
+    if value then if refreshAccent then refreshAccent() end;applyAppearance() end
 end
 listen(floating.Activated,function() show(not state.visible) end)
 listen(brand.Activated,function() show(false) end)
 listen(minimize.Activated,function() show(false) end)
 local function draggable(handle,target,isFloating)
-    local start,startPos,active,moved
     listen(handle.InputBegan,function(input)
         if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
-            start=input.Position; startPos=target.Position; active=input; moved=false
-        end
-    end)
-    listen(Input.InputChanged,function(input)
-        if active and (input==active or input.UserInputType==Enum.UserInputType.MouseMovement) then
-            local delta=input.Position-start
-            if math.abs(delta.X)+math.abs(delta.Y)>8 then moved=true end
+            local start,startPos=input.Position,target.Position
+            beginPointer(input,function(current)
+            local delta=current.Position-start
             local cam=workspace.CurrentCamera; if not cam then return end
             local view=cam.ViewportSize
             local x=startPos.X.Scale*view.X+startPos.X.Offset+delta.X
@@ -255,9 +335,9 @@ local function draggable(handle,target,isFloating)
             local halfH=isFloating and 0 or 219*scale.Scale
             target.Position=UDim2.fromOffset(math.clamp(x,halfW,view.X-(isFloating and 42 or halfW)),
                 math.clamp(y,halfH,view.Y-(isFloating and 42 or halfH)))
+            end)
         end
     end)
-    listen(Input.InputEnded,function(input) if input==active then active=nil; if moved and isFloating then state.suppressFloat=true; task.defer(function() state.suppressFloat=false end) end end end)
 end
 draggable(dragbar,window,false)
 
@@ -300,11 +380,12 @@ local function page(name,number)
         local col=create("Frame",{Name="Column"..i,Size=UDim2.new(0.5,-5,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundTransparency=1,LayoutOrder=i},scroll)
         create("UIListLayout",{Padding=UDim.new(0,7),SortOrder=Enum.SortOrder.LayoutOrder},col);columns[i]=col
     end
-    pages[name]={root=scroll,columns=columns,number=number}
+    pages[name]={root=scroll,columns=columns,number=number,texts={}}
     return columns[1],columns[2]
 end
 local function selectPage(name)
     if not pages[name] then return end
+    if state.page==name and pages[name].root.Visible then return end
     state.page=name
     for key,p in pairs(pages) do p.root.Visible=key==name end
     heading.Text=string.format("%02d / %s",pages[name].number,string.upper(name))
@@ -314,11 +395,16 @@ local function selectPage(name)
         n.marker.Visible=key==name
     end
     -- Fade text only: avoids CanvasGroup render textures on low-memory phones.
-    for _,o in ipairs(pages[name].root:GetDescendants()) do
-        if o:IsA("TextLabel") or o:IsA("TextButton") or o:IsA("TextBox") then
+    for _,o in ipairs(pages[name].texts) do
+        local visible=true;local p=o.Parent
+        while p and p~=pages[name].root do
+            if p:IsA("GuiObject") and not p.Visible then visible=false;break end;p=p.Parent
+        end
+        if visible and o.Parent and o.Text~="" then
             o.TextTransparency=1; tween(o,{TextTransparency=0},0.16)
         end
     end
+    applyAppearance();if refreshAccent then refreshAccent() end
     if name=="ESP" and refreshPreview then task.defer(refreshPreview) end
 end
 API.SelectPage=selectPage
@@ -338,6 +424,7 @@ local function card(parent,title,key,description)
     local f=themed(create("Frame",{Name=key or title,Size=UDim2.new(1,0,0,36),AutomaticSize=Enum.AutomaticSize.None,
         BorderSizePixel=0,BackgroundTransparency=0.3,ClipsDescendants=true},parent),"BackgroundColor3","card")
     round(f,6)
+    surface(f,0.3)
     local stroke=accented(create("UIStroke",{Thickness=0.8,Transparency=0.95},f),"Color")
     create("UIGradient",{Rotation=18,Color=ColorSequence.new(Color3.fromRGB(200,188,216),Color3.fromRGB(255,245,240))},f)
     local top=button(f,"",12,{Name="Header",Size=UDim2.new(1,0,0,36),BackgroundTransparency=1})
@@ -369,6 +456,7 @@ local function card(parent,title,key,description)
     end
     listen(expand.Activated,expandCard);listen(top.Activated,expandCard)
     if key then
+        optionLabels[key]=title
         local function redraw(value,instant)
             local change=instant and function(o,p) for k,v in pairs(p) do o[k]=v end end or tween
             change(knob,{Position=UDim2.fromOffset(value and 16 or 2,2),BackgroundColor3=value and accent or colors.muted})
@@ -378,17 +466,18 @@ local function card(parent,title,key,description)
             label.TextColor3=value and colors.text or colors.muted
         end
         watch(key,redraw)
-        accentRefreshers[#accentRefreshers+1]=function() redraw(cfg[key],true) end
-        listen(toggle.Activated,function() if set(key,not cfg[key]) and cfg.sounds then API.PlaySound() end end)
+        accentRefreshers[#accentRefreshers+1]={pageOf(f),function() redraw(cfg[key],true) end}
+        listen(toggle.Activated,function() set(key,not cfg[key]) end)
     else toggle.Visible=false;expand.Position=UDim2.new(1,-29,0,8);label.Size=UDim2.new(1,-46,0,22) end
     return content,expandCard,f
 end
 local function checkbox(parent,label,key)
+    optionLabels[key]=label
     local b=button(parent,label,10,{Name=key,Size=UDim2.new(1,0,0,23),BackgroundTransparency=1,TextXAlignment=Enum.TextXAlignment.Left})
     local mark=button(b,"",9,{Position=UDim2.new(1,-18,0,4),Size=UDim2.fromOffset(14,14),BackgroundTransparency=0.4})
     local function update(v) mark.Text=v and "+" or "";mark.BackgroundColor3=v and accent or Color3.fromRGB(58,51,65) end
     watch(key,update)
-    accentRefreshers[#accentRefreshers+1]=function() update(cfg[key]) end
+    accentRefreshers[#accentRefreshers+1]={pageOf(b),function() update(cfg[key]) end}
     local function toggle() set(key,not cfg[key]) end
     listen(b.Activated,toggle);listen(mark.Activated,toggle)
     return b
@@ -399,6 +488,7 @@ local function slider(parent,label,key,min,max,step,unit)
     local value=create("TextBox",{Name="Value",Size=UDim2.new(0.34,0,0,18),Position=UDim2.fromScale(0.66,0),Text="",
         TextColor3=accent,TextSize=10,Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Right,
         BackgroundTransparency=1,ClearTextOnFocus=false},f)
+    local pg=pageOf(value);if pg then pages[pg.Name].texts[#pages[pg.Name].texts+1]=value end
     accented(value,"TextColor3")
     local hit=button(f,"",10,{Name="SliderInput",Position=UDim2.fromOffset(0,18),Size=UDim2.new(1,0,0,18),BackgroundTransparency=1})
     local track=create("Frame",{Name="Track",Position=UDim2.fromOffset(0,7),Size=UDim2.new(1,0,0,4),BackgroundColor3=Color3.fromRGB(64,53,68),BorderSizePixel=0},hit)
@@ -410,17 +500,14 @@ local function slider(parent,label,key,min,max,step,unit)
         if not value:IsFocused() then value.Text=(step>=1 and string.format("%.0f",v) or string.format("%.2f",v))..(unit or "") end
     end
     watch(key,redraw)
-    local active
     local function update(input)
         if track.AbsoluteSize.X<=0 then return end
         local x=math.clamp((input.Position.X-track.AbsolutePosition.X)/track.AbsoluteSize.X,0,1)
         local v=math.clamp(math.floor((min+(max-min)*x)/step+0.5)*step,min,max); set(key,v)
     end
     listen(hit.InputBegan,function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then active=input;update(input) end
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then beginPointer(input,update) end
     end)
-    listen(Input.InputChanged,function(input) if active and (input==active or input.UserInputType==Enum.UserInputType.MouseMovement) then update(input) end end)
-    listen(Input.InputEnded,function(input) if input==active then active=nil end end)
     listen(value.FocusLost,function()
         local v=tonumber((value.Text:gsub("[^%d%.%-]","")))
         if v then set(key,math.clamp(v,min,max)) else redraw(cfg[key]) end
@@ -445,6 +532,18 @@ local function pending(parent,title,key)
     return c
 end
 
+local quickPanel=create("Frame",{Name="QuickUI",Position=UDim2.new(1,-246,0,36),Size=UDim2.fromOffset(230,156),
+    BackgroundColor3=colors.card,BorderSizePixel=0,Visible=false,ZIndex=20},window)
+round(quickPanel,8);surface(quickPanel,0)
+accented(create("UIStroke",{Thickness=0.8,Transparency=0.45},quickPanel),"Color")
+create("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,12),PaddingTop=UDim.new(0,10)},quickPanel)
+create("UIListLayout",{Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder},quickPanel)
+text(quickPanel,"AJUSTES DO MENU",10,{Font=Enum.Font.GothamBold})
+slider(quickPanel,"Escala do menu","uiScale",0.45,1.6,0.05,"x")
+slider(quickPanel,"Transparencia","transparency",0,85,1,"%")
+checkbox(quickPanel,"Notificacoes","notifications")
+listen(quickButton.Activated,function() quickPanel.Visible=not quickPanel.Visible;uiDirty=true end)
+
 local left,right=page("Combat",2)
 local c=card(left,"Auto Revive","autoRevive","Aciona prompts proximos com Revive/Reviver. Nao implementa reviver a si mesmo por um evento desconhecido.")
 slider(c,"Intervalo","promptDelay",0.25,3,0.05,"s")
@@ -463,6 +562,8 @@ slider(c,"Range","attackRange",2,50,1," studs");slider(c,"Delay","attackDelay",0
 c=card(right,"Auto Pick","autoPick","Aciona prompts proximos de coleta (pick up, collect, coletar). Precisa de fireproximityprompt no executor.")
 slider(c,"Intervalo","promptDelay",0.25,3,0.05,"s")
 pending(right,"Auto Tackle","autoTackle");pending(right,"Dash Cooldown","dashCooldown");pending(right,"Auto Ability","autoAbility")
+c=card(right,"Anti-Hit (pendente)","antiHit","Indisponivel: o diagnostico identifica os eventos, mas nao revela a validacao dos hits. Invulnerabilidade ainda nao foi implementada.")
+text(c,"Status: nao validado",10)
 left,right=page("AI",3)
 pending(left,"Runner AI","runnerAI");pending(right,"Catcher AI","catcherAI")
 local info=card(left,"Huss Valley / integracao",nil,"O caminho do mapa, zonas seguras, equipes e controles precisam ser identificados dentro do jogo. Use o diagnostico para a proxima etapa.")
@@ -478,7 +579,7 @@ c=card(left,"Appearance",nil);cycle(c,"Accent","accent",{"Peach","Purple","Blue"
 card(left,"View Tracer","viewTracer","Mostra a direcao em que os outros jogadores olham.")
 pending(left,"Leaderboard Visuals","leaderboard")
 card(left,"Name Hider","nameHider","Oculta o nome padrao sobre seu personagem apenas neste cliente.")
-c=card(right,"Settings",nil);slider(c,"Max distance","espRange",50,3000,50," studs");slider(c,"Update rate","espRate",2,20,1," Hz")
+c=card(right,"Settings",nil);slider(c,"Max distance","espRange",50,3000,50," studs");slider(c,"Update rate","espRate",2,30,1," Hz");checkbox(c,"ESP suave","smoothESP")
 card(right,"Chams","chams","Contorno local dos jogadores com Highlight.")
 pending(right,"Hit Box","hitbox");pending(right,"Gems & Coins","gems")
 card(right,"Headless","headless","Esconde sua cabeca apenas neste cliente.")
@@ -529,8 +630,8 @@ c=card(right,"Playback",nil);actionButton(c,"Stop Emote",function() API.StopEmot
 left,right=page("Config",9)
 local customizeExpand
 c,customizeExpand=card(left,"Customize UI",nil,"Cores, transparencia e escala. A interface se ajusta ao tamanho da tela.")
-slider(c,"UI Scale","uiScale",0.65,1.4,0.05,"x");cycle(c,"Theme","theme",{"Dark","Black"})
-slider(c,"Menu Opacity","opacity",0.5,1,0.01);checkbox(c,"Sound Effects","sounds")
+slider(c,"Escala do menu","uiScale",0.45,1.6,0.05,"x");cycle(c,"Theme","theme",{"Dark","Black"})
+slider(c,"Transparencia","transparency",0,85,1,"%");checkbox(c,"Notificacoes","notifications");checkbox(c,"Sound Effects","sounds")
 cycle(c,"Accent Color","accent",{"Peach","Purple","Blue","Pink","Green"});checkbox(c,"Rainbow Accent","rainbow")
 customizeExpand()
 c=card(left,"Interface",nil);cycle(c,"Toggle Menu Key","toggleKey",{"RightShift","LeftAlt","Insert","F4"});checkbox(c,"Floating Logo Button","floating")
@@ -538,30 +639,36 @@ actionButton(c,"Reset Position",function() window.Position=UDim2.fromScale(0.5,0
 local configs,configExpand=card(right,"Configs",nil,"Salva no executor quando ha acesso a arquivos; caso contrario, guarda apenas nesta sessao.")
 local configName=create("TextBox",{Name="ConfigName",Size=UDim2.new(1,0,0,27),Text="my-config",PlaceholderText="Config name",ClearTextOnFocus=false,
     BackgroundColor3=Color3.fromRGB(36,29,44),TextColor3=colors.text,TextSize=10,Font=Enum.Font.GothamMedium,BorderSizePixel=0},configs);round(configName,5)
+surface(configName,0)
 actionButton(configs,"Save Config",function() API.SaveConfig(configName.Text) end)
 actionButton(configs,"Load Config",function() API.LoadConfig(configName.Text) end)
 actionButton(configs,"Delete Config",function() API.DeleteConfig(configName.Text) end)
 checkbox(configs,"Auto-Load This Config On Launch","autoLoad");configExpand()
-local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.1.0")
+local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.2.0")
 actionButton(suite,"Rejoin Server",function() API.Rejoin() end)
 actionButton(suite,"Destroy Menu",function() API.Destroy() end)
 actionButton(suite,"Copiar diagnostico",function() API.ExportDiagnostics() end);suiteExpand()
 bootProgress(0.7,"Interface ready / connecting controls...")
 
--- Theme changes update the existing widgets instead of rebuilding the whole interface.
+-- Rainbow updates only accent colors on visible pages, never the full theme.
+refreshAccent=function()
+    accent=cfg.rainbow and Color3.fromHSV((os.clock()*0.08)%1,0.45,1) or palette[cfg.accent]
+    if not state.visible then return end
+    for _,entry in ipairs(accentItems) do if entry[1].Parent and (not entry[3] or entry[3].Visible) then entry[1][entry[2]]=accent end end
+    for _,entry in ipairs(accentRefreshers) do if not entry[1] or entry[1].Visible then entry[2]() end end
+end
 refreshTheme=function()
     colors.bg=cfg.theme=="Black" and Color3.fromRGB(7,7,10) or Color3.fromRGB(16,14,23)
     colors.card=cfg.theme=="Black" and Color3.fromRGB(20,19,25) or Color3.fromRGB(27,23,36)
-    accent=cfg.rainbow and Color3.fromHSV((os.clock()*0.08)%1,0.45,1) or palette[cfg.accent]
     for _,entry in ipairs(themes) do if entry[1].Parent then entry[1][entry[2]]=colors[entry[3]] end end
-    for _,entry in ipairs(accentItems) do if entry[1].Parent then entry[1][entry[2]]=accent end end
-    for _,fn in ipairs(accentRefreshers) do fn() end
-    window.BackgroundTransparency=1-cfg.opacity
+    refreshAccent();applyAppearance()
 end
 local clickSound=create("Sound",{Name="UITick",SoundId="rbxasset://sounds/electronicpingshort.wav",Volume=0.15},gui)
 function API.PlaySound() if cfg.sounds then pcall(function() clickSound:Play() end) end end
-actions.uiScale=fit;actions.opacity=function(v) window.BackgroundTransparency=1-v end
-actions.theme=refreshTheme;actions.accent=refreshTheme;actions.rainbow=refreshTheme
+actions.uiScale=fit
+actions.transparency=function(v) cfg.opacity=1-v/100;uiDirty=true end
+actions.opacity=function(v) set("transparency",(1-v)*100,true) end
+actions.theme=refreshTheme;actions.accent=refreshAccent;actions.rainbow=refreshAccent
 actions.floating=function(v) floating.Visible=v or not state.visible end
 
 -- Character and camera features.
@@ -583,7 +690,18 @@ updateFlight=function()
     flightPad.Visible=Input.TouchEnabled
 end
 actions.fly=updateFlight
-actions.noclip=function(v) if not v then restore("collision") end end
+local collisionParts,collisionConnection={},nil
+actions.noclip=function(v)
+    if collisionConnection then collisionConnection:Disconnect();collisionConnection=nil end
+    collisionParts={}
+    restore("collision")
+    if not v then return end
+    local char=player.Character;if not char then return end
+    for _,part in ipairs(char:GetDescendants()) do if part:IsA("BasePart") then collisionParts[#collisionParts+1]=part end end
+    collisionConnection=char.DescendantAdded:Connect(function(part)
+        if part:IsA("BasePart") then collisionParts[#collisionParts+1]=part end
+    end)
+end
 local function applySpeed()
     if cfg.movement or cfg.speedBoost then local _,h=character();if h then patch("speed",h,"WalkSpeed",cfg.walkSpeed) end
     else restore("speed") end
@@ -626,7 +744,7 @@ end
 bindCameraSize();listen(workspace:GetPropertyChangedSignal("CurrentCamera"),bindCameraSize)
 
 -- Visual performance changes are cancellable, batched, and reversible.
-local perfToken=0
+local perfToken,perfQueued,perfCache=0,false,nil
 local function ownObject(o) return o:IsDescendantOf(gui) or o:IsDescendantOf(visuals) end
 local function characterPart(o)
     local model=o:FindFirstAncestorOfClass("Model")
@@ -648,24 +766,34 @@ local function optimize(o)
 end
 refreshPerformance=function()
     perfToken=perfToken+1;local token=perfToken;restore("perf")
-    if not cfg.fpsBoost then perfStatus.Text="Status: off";return end
+    if not cfg.fpsBoost then perfCache=nil;perfStatus.Text="Status: off";return end
     if cfg.noShadows then patch("perf",Lighting,"GlobalShadows",false) end
     if cfg.noFog then patch("perf",Lighting,"FogEnd",1000000);patch("perf",Lighting,"FogStart",1000000) end
     perfStatus.Text="Aplicando..."
     task.spawn(function()
-        local objects=workspace:GetDescendants()
-        for _,o in ipairs(Lighting:GetDescendants()) do objects[#objects+1]=o end
-        local count=0
-        for i,o in ipairs(objects) do
+        if not perfCache then
+            perfCache=setmetatable({},{__mode="k"})
+            for _,o in ipairs(workspace:GetDescendants()) do perfCache[o]=true end
+            for _,o in ipairs(Lighting:GetDescendants()) do perfCache[o]=true end
+        end
+        local count,inspected=0,0
+        for o in pairs(perfCache) do
             if not state.alive or token~=perfToken then return end
+            inspected=inspected+1
             if o.Parent then optimize(o);count=count+1 end
-            if i%160==0 then task.wait() end
+            if inspected%160==0 then task.wait() end
         end
         if state.alive and token==perfToken then perfStatus.Text="Status: on | "..count.." objetos avaliados" end
     end)
 end
-actions.fpsBoost=refreshPerformance
-for _,key in ipairs({"removeTextures","removeDecals","removeParticles","lowDetail","noShadows","noFog","removeAccessories"}) do actions[key]=function() if cfg.fpsBoost then refreshPerformance() end end end
+local function schedulePerformance()
+    if perfQueued then return end
+    perfQueued=true
+    task.defer(function() perfQueued=false;if state.alive and cfg.fpsBoost then refreshPerformance() end end)
+end
+actions.fpsBoost=function(v) if v then schedulePerformance() else refreshPerformance() end end
+for _,key in ipairs({"removeTextures","removeDecals","removeParticles","lowDetail","noShadows","noFog","removeAccessories"}) do actions[key]=function() if cfg.fpsBoost then schedulePerformance() end end end
+listen(Lighting.DescendantAdded,function(o) if cfg.fpsBoost then if perfCache then perfCache[o]=true end;optimize(o) end end)
 actions.lowQuality=function(v)
     restore("quality");if v then
         assert(patch("quality",UserSettings():GetService("UserGameSettings"),"SavedQualityLevel",Enum.SavedQualitySetting.QualityLevel1),"Qualidade grafica protegida nesta versao.")
@@ -693,25 +821,42 @@ actions.xray=function(v)
 end
 
 -- Reusable target selection does not assume undocumented team/role names.
+local roster=Players:GetPlayers()
+listen(Players.PlayerAdded,function(p) roster[#roster+1]=p end)
+listen(Players.PlayerRemoving,function(p)
+    actorCache[p]=nil
+    for i=#roster,1,-1 do if roster[i]==p then table.remove(roster,i) end end
+end)
 local function sameTeam(p) return player.Team~=nil and p.Team==player.Team end
 local function nearest(radius)
     local _,_,root=character();if not root then return end
     local target,best
-    best=radius
-    for _,p in ipairs(Players:GetPlayers()) do
+    best=radius*radius
+    for _,p in ipairs(roster) do
         if p~=player and not (cfg.teamCheck and sameTeam(p)) then
-            local ch=p.Character;local h=ch and ch:FindFirstChildOfClass("Humanoid");local r=ch and ch:FindFirstChild("HumanoidRootPart")
-            if h and r and h.Health>0 then local d=(r.Position-root.Position).Magnitude;if d<best then best=d;target=r end end
+            local a=actor(p);local h,r=a.hum,a.root
+            if h and r and h.Health>0 then local delta=r.Position-root.Position;local d=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z;if d<best then best=d;target=r end end
         end
     end
-    return target,best
+    return target,math.sqrt(best)
 end
-local prompts={}
+local prompts,promptsReady,promptsScanning={},false,false
 local function indexPrompt(o) if o:IsA("ProximityPrompt") then prompts[o]=true end end
-task.spawn(function() for i,o in ipairs(workspace:GetDescendants()) do if not state.alive then return end;indexPrompt(o);if i%300==0 then task.wait() end end end)
+local function preparePrompts(immediate)
+    if promptsReady then return end
+    local function scan(allowYield)
+        for i,o in ipairs(workspace:GetDescendants()) do
+            if not state.alive then return end
+            indexPrompt(o);if allowYield and i%300==0 then task.wait() end
+        end
+        promptsReady=true;promptsScanning=false
+    end
+    if immediate then scan(false)
+    elseif not promptsScanning then promptsScanning=true;task.spawn(function() scan(true) end) end
+end
 listen(workspace.DescendantAdded,function(o)
     indexPrompt(o)
-    if cfg.fpsBoost then optimize(o) end
+    if cfg.fpsBoost then if perfCache then perfCache[o]=true end;optimize(o) end
     if cfg.xray and o:IsA("BasePart") and not ownObject(o) then task.defer(function()
         if state.alive and cfg.xray and o.Parent and not characterPart(o) then patch("xray",o,"LocalTransparencyModifier",0.65) end
     end) end
@@ -738,15 +883,16 @@ local function processPrompts()
 end
 local function checkPromptCapability(v)
     if v and type(fireproximityprompt)~="function" then error("fireproximityprompt indisponivel") end
+    if v then preparePrompts() end
 end
 actions.autoPick=checkPromptCapability;actions.autoRevive=checkPromptCapability
 local function triggerTool()
     local char=player.Character;local tool=char and char:FindFirstChildOfClass("Tool")
     if tool then tool:Activate() end
 end
-local adapterTimers={}
+local adapterTimers,activeAdapters={},{}
 local function stepAdapters(dt)
-    for key,name in pairs(requiresAdapter) do
+    for key,name in pairs(activeAdapters) do
         if cfg[key] and type(adapters[name])=="function" and not state.pending[key] then
             adapterTimers[key]=(adapterTimers[key] or 0)+dt
             if adapterTimers[key]>=0.25 then
@@ -762,6 +908,7 @@ local function stepAdapters(dt)
     end
 end
 for key,name in pairs(requiresAdapter) do actions[key]=function(v)
+    activeAdapters[key]=v and name or nil
     if not v and type(adapters[name])=="function" then adapters[name]({Player=player,Config=cfg,Enabled=false}) end
 end end
 listen(player.Idled,function()
@@ -786,9 +933,9 @@ local function recordFor(p)
     local f=create("Frame",{Name="PlayerESP",BackgroundTransparency=1,Size=UDim2.new(),Visible=false},overlay)
     local box=create("Frame",{Name="Box",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},f)
     local stroke=create("UIStroke",{Color=accent,Thickness=1,Transparency=0.1},box)
-    local name=text(f,"",10,{Name="Name",AnchorPoint=Vector2.new(0.5,1),Position=UDim2.fromScale(0.5,0),Size=UDim2.fromOffset(190,16),TextXAlignment=Enum.TextXAlignment.Center,TextStrokeTransparency=0.3})
+    local name=text(f,"",10,{Name="Name",AnchorPoint=Vector2.new(0.5,1),Position=UDim2.fromScale(0.5,0),Size=UDim2.fromOffset(190,16),TextXAlignment=Enum.TextXAlignment.Center,TextStrokeTransparency=0.3},true)
     local hp=create("Frame",{Name="Health",AnchorPoint=Vector2.new(1,1),Position=UDim2.new(0,-4,1,0),Size=UDim2.new(0,2,1,0),BackgroundColor3=Color3.fromRGB(112,226,151),BorderSizePixel=0},f)
-    local detail=text(f,"",9,{Name="Distance",Position=UDim2.new(0,-30,1,2),Size=UDim2.new(1,60,0,15),TextXAlignment=Enum.TextXAlignment.Center,TextStrokeTransparency=0.3})
+    local detail=text(f,"",9,{Name="Distance",Position=UDim2.new(0,-30,1,2),Size=UDim2.new(1,60,0,15),TextXAlignment=Enum.TextXAlignment.Center,TextStrokeTransparency=0.3},true)
     local tracer=line(f,0,0,0,0,accent,1)
     local view=line(f,0,0,0,0,accent,1)
     local dot=create("Frame",{Name="HeadDot",AnchorPoint=Vector2.new(0.5,0.5),Size=UDim2.fromOffset(4,4),BackgroundColor3=accent,BorderSizePixel=0},f);round(dot,6)
@@ -801,23 +948,49 @@ local function moveLine(object,x1,y1,x2,y2)
     local dx,dy=x2-x1,y2-y1;object.Position=UDim2.fromOffset((x1+x2)/2,(y1+y2)/2)
     object.Size=UDim2.fromOffset(math.sqrt(dx*dx+dy*dy),1);object.Rotation=math.deg(math.atan2(dy,dx))
 end
+local function setESPBounds(r,x,y,w,h)
+    if r.desired and math.abs(r.desired[1]-x)<0.02 and math.abs(r.desired[2]-y)<0.02 and math.abs(r.desired[3]-w)<0.02 and math.abs(r.desired[4]-h)<0.02 then return end
+    r.desired={x,y,w,h}
+    if not r.draw or not cfg.smoothESP then
+        r.draw={x,y,w,h};r.frame.Position=UDim2.fromOffset(x,y);r.frame.Size=UDim2.fromOffset(w,h)
+    end
+    r.moving=true
+end
+local function writeChanged(object,property,value) if object[property]~=value then object[property]=value end end
+local function renderESP(dt)
+    if not cfg.smoothESP or not (cfg.esp or cfg.viewTracer) then return end
+    local alpha=1-math.exp(-24*dt)
+    for _,r in pairs(espRecords) do
+        if r.frame.Visible and r.moving and r.draw and r.desired then
+            local largest=0
+            for i=1,4 do local delta=r.desired[i]-r.draw[i];largest=math.max(largest,math.abs(delta));r.draw[i]=r.draw[i]+delta*alpha end
+            if largest<0.05 then r.moving=false;for i=1,4 do r.draw[i]=r.desired[i] end end
+            r.frame.Position=UDim2.fromOffset(r.draw[1],r.draw[2]);r.frame.Size=UDim2.fromOffset(r.draw[3],r.draw[4])
+        end
+    end
+end
 local function updateESP()
     local cam=workspace.CurrentCamera;local _,_,localRoot=character()
     if not cam or not localRoot then for p in pairs(espRecords) do clearRecord(p) end;return end
     if not (cfg.esp or cfg.chams or cfg.viewTracer) then for p in pairs(espRecords) do clearRecord(p) end;return end
-    for _,p in ipairs(Players:GetPlayers()) do
+    for _,p in ipairs(roster) do
         if p~=player then
-            local ch=p.Character;local h=ch and ch:FindFirstChildOfClass("Humanoid");local root=ch and ch:FindFirstChild("HumanoidRootPart")
+            local a=actor(p);local ch,h,root=a.char,a.hum,a.root
             local dist=root and (root.Position-localRoot.Position).Magnitude or math.huge
             local eligible=root and h and h.Health>0 and dist<=cfg.espRange and not(cfg.teamFilter and sameTeam(p))
             if not eligible then clearRecord(p)
             else
                 local r=recordFor(p);local color=cfg.roleColors and p.Team and p.TeamColor.Color or accent
-                r.highlight.Enabled=cfg.chams;r.highlight.Adornee=ch;r.highlight.FillColor=color;r.highlight.OutlineColor=color
+                writeChanged(r.highlight,"Enabled",cfg.chams);writeChanged(r.highlight,"Adornee",ch);writeChanged(r.highlight,"FillColor",color);writeChanged(r.highlight,"OutlineColor",color)
                 local center,on=cam:WorldToViewportPoint(root.Position)
-                r.frame.Visible=on and (cfg.esp or cfg.viewTracer)
-                if on then
-                    local cf,size=ch:GetBoundingBox();local minX,minY,maxX,maxY=math.huge,math.huge,-math.huge,-math.huge
+                writeChanged(r.frame,"Visible",on and (cfg.esp or cfg.viewTracer))
+                if on and (cfg.esp or cfg.viewTracer) then
+                    if r.boundsCharacter~=ch or not r.nextBounds or (state.elapsed or 0)>=r.nextBounds then
+                        local bounds,size=ch:GetBoundingBox();r.boundOffset=root.CFrame:ToObjectSpace(bounds);r.boundSize=size
+                        r.boundsCharacter=ch;r.nextBounds=(state.elapsed or 0)+0.5
+                    end
+                    local cf,size=root.CFrame*r.boundOffset,r.boundSize
+                    local minX,minY,maxX,maxY=math.huge,math.huge,-math.huge,-math.huge
                     local validBox=true
                     for x=-1,1,2 do for y=-1,1,2 do for z=-1,1,2 do
                         local v=cam:WorldToViewportPoint(cf*Vector3.new(size.X*x/2,size.Y*y/2,size.Z*z/2))
@@ -825,19 +998,23 @@ local function updateESP()
                         minX=math.min(minX,v.X);minY=math.min(minY,v.Y);maxX=math.max(maxX,v.X);maxY=math.max(maxY,v.Y)
                     end end end
                     if validBox then
-                        r.frame.Position=UDim2.fromOffset(minX,minY);r.frame.Size=UDim2.fromOffset(maxX-minX,maxY-minY)
-                        r.box.Visible=cfg.esp and cfg.boxes;r.stroke.Color=color
-                        r.name.Visible=cfg.esp and cfg.names;r.name.Text=p.DisplayName
-                        r.detail.Visible=cfg.esp and (cfg.distance or cfg.healthText)
-                        r.detail.Text=(cfg.distance and string.format("%d studs",math.floor(dist)) or "")..(cfg.healthText and string.format("  %d HP",math.floor(h.Health)) or "")
-                        r.hp.Visible=cfg.esp and cfg.health;r.hp.Size=UDim2.new(0,2,math.clamp(h.Health/math.max(1,h.MaxHealth),0,1),0)
-                        r.tracer.Visible=cfg.esp and cfg.tracers;r.tracer.BackgroundColor3=color
-                        moveLine(r.tracer,cam.ViewportSize.X/2-minX,cam.ViewportSize.Y-minY,center.X-minX,maxY-minY)
-                        local head=ch:FindFirstChild("Head") or root;local start=cam:WorldToViewportPoint(head.Position)
+                        setESPBounds(r,minX,minY,maxX-minX,maxY-minY)
+                        writeChanged(r.box,"Visible",cfg.esp and cfg.boxes);writeChanged(r.stroke,"Color",color)
+                        writeChanged(r.name,"Visible",cfg.esp and cfg.names);writeChanged(r.name,"Text",p.DisplayName)
+                        writeChanged(r.detail,"Visible",cfg.esp and (cfg.distance or cfg.healthText))
+                        writeChanged(r.detail,"Text",(cfg.distance and string.format("%d studs",math.floor(dist)) or "")..(cfg.healthText and string.format("  %d HP",math.floor(h.Health)) or ""))
+                        writeChanged(r.hp,"Visible",cfg.esp and cfg.health)
+                        local healthRatio=math.clamp(h.Health/math.max(1,h.MaxHealth),0,1)
+                        if r.healthRatio~=healthRatio then r.healthRatio=healthRatio;r.hp.Size=UDim2.new(0,2,healthRatio,0) end
+                        writeChanged(r.tracer,"Visible",cfg.esp and cfg.tracers);writeChanged(r.tracer,"BackgroundColor3",color)
+                        if r.tracer.Visible then moveLine(r.tracer,cam.ViewportSize.X/2-minX,cam.ViewportSize.Y-minY,center.X-minX,maxY-minY) end
+                        if not a.head or not a.head.Parent then a.head=ch:FindFirstChild("Head") end
+                        local head=a.head or root;local start=cam:WorldToViewportPoint(head.Position)
                         local finish=cam:WorldToViewportPoint(head.Position+head.CFrame.LookVector*5)
-                        r.view.Visible=cfg.viewTracer and finish.Z>0;r.view.BackgroundColor3=color
-                        moveLine(r.view,start.X-minX,start.Y-minY,finish.X-minX,finish.Y-minY)
-                        r.dot.Visible=cfg.esp and cfg.headDot;r.dot.Position=UDim2.fromOffset(start.X-minX,start.Y-minY);r.dot.BackgroundColor3=color
+                        writeChanged(r.view,"Visible",cfg.viewTracer and finish.Z>0);writeChanged(r.view,"BackgroundColor3",color)
+                        if r.view.Visible then moveLine(r.view,start.X-minX,start.Y-minY,finish.X-minX,finish.Y-minY) end
+                        writeChanged(r.dot,"Visible",cfg.esp and cfg.headDot);writeChanged(r.dot,"BackgroundColor3",color)
+                        if r.dot.Visible then r.dot.Position=UDim2.fromOffset(start.X-minX,start.Y-minY) end
                         if cfg.skeleton and cfg.esp then
                             if r.character~=ch then
                                 for _,b in ipairs(r.bones) do b:Destroy() end;r.joints={};r.bones={};r.character=ch
@@ -863,16 +1040,19 @@ local function updateESP()
 end
 listen(Players.PlayerRemoving,clearRecord)
 for _,key in ipairs({"esp","chams","viewTracer"}) do actions[key]=updateESP end
+local previewCharacter
 refreshPreview=function()
     if not state.alive or state.page~="ESP" then return end
-    previewWorld:ClearAllChildren()
     local char=player.Character;if not char then previewNote.Text="Avatar carregando...";return end
+    if previewCharacter==char and #previewWorld:GetChildren()>0 then return end
+    previewWorld:ClearAllChildren();previewCharacter=nil
     local old=char.Archivable;char.Archivable=true
     local ok,clone=pcall(function() return char:Clone() end);char.Archivable=old
     if not ok or not clone then previewNote.Text="Preview indisponivel";return end
     for _,o in ipairs(clone:GetDescendants()) do if o:IsA("LuaSourceContainer") or o:IsA("Tool") then o:Destroy()
         elseif o:IsA("BasePart") then o.Anchored=true end end
     clone.Parent=previewWorld
+    previewCharacter=char
     local cf,size=clone:GetBoundingBox();local distance=math.max(size.X,size.Y,size.Z)*1.9
     previewCam.CFrame=CFrame.lookAt(cf.Position+Vector3.new(0,size.Y*0.05,-distance),cf.Position)
     previewNote.Text=player.DisplayName.." / preview local"
@@ -935,9 +1115,10 @@ function API.LoadConfig(name,quiet)
     name=safeName(name);assert(name~="_autoload","Este nome e reservado.");local data=loadRecord(name)
     if not data then if not quiet then notify("Config nao encontrada: "..name) end;return false end
     configName.Text=name
+    if data.transparency==nil and type(data.opacity)=="number" then data.transparency=math.clamp((1-data.opacity)*100,0,85) end
     -- Apply non-booleans first so enabled features receive their configured values.
     for _,booleans in ipairs({false,true}) do for key in pairs(defaults) do
-        if data[key]~=nil and (type(defaults[key])=="boolean")==booleans then set(key,data[key],true) end
+        if key~="opacity" and data[key]~=nil and (type(defaults[key])=="boolean")==booleans then set(key,data[key],true) end
     end end
     if not quiet then notify("Config carregada: "..name) end;return true
 end
@@ -959,6 +1140,7 @@ end
 -- Diagnostic data stays local: only paths/classes and selected game-state attributes.
 local diagnosticBox
 function API.ExportDiagnostics()
+    preparePrompts(true)
     local report={version=API.Version,placeId=game.PlaceId,gameId=game.GameId,remotes={},prompts={},roles={}}
     for _,o in ipairs(Replicated:GetDescendants()) do
         if o:IsA("RemoteEvent") or o:IsA("RemoteFunction") or o:IsA("UnreliableRemoteEvent") then
@@ -991,10 +1173,13 @@ function API.ExportDiagnostics()
 end
 
 -- One heartbeat and one late camera update. Expensive work is rate-limited.
-local elapsed,speedElapsed,promptElapsed,attackElapsed,gearElapsed,espElapsed,hueElapsed=0,0,0,0,0,0,0
+local elapsed,speedElapsed,promptElapsed,attackElapsed,gearElapsed,espElapsed,hueElapsed,aimElapsed=0,0,0,0,0,0,0,0
+actions.lockOn=function() state.aimTarget=nil;aimElapsed=1 end
+actions.radius=function() aimElapsed=1 end
+actions.teamCheck=function() aimElapsed=1 end
 listen(Run.Heartbeat,function(dt)
     if not state.alive then return end
-    elapsed=elapsed+dt;speedElapsed=speedElapsed+dt;promptElapsed=promptElapsed+dt;attackElapsed=attackElapsed+dt;gearElapsed=gearElapsed+dt;espElapsed=espElapsed+dt;hueElapsed=hueElapsed+dt
+    elapsed=elapsed+dt;state.elapsed=elapsed;speedElapsed=speedElapsed+dt;promptElapsed=promptElapsed+dt;attackElapsed=attackElapsed+dt;gearElapsed=gearElapsed+dt;espElapsed=espElapsed+dt;hueElapsed=hueElapsed+dt;aimElapsed=aimElapsed+dt
     local char,hum,root=character();local cam=workspace.CurrentCamera
     if speedElapsed>=0.1 then speedElapsed=0;applySpeed() end
     if root and hum and hum.Health>0 then
@@ -1005,7 +1190,10 @@ listen(Run.Heartbeat,function(dt)
             if direction.Magnitude>1 then direction=direction.Unit end
             flight[2].VectorVelocity=direction*cfg.flySpeed;flight[3].CFrame=cam.CFrame.Rotation
         end
-        if cfg.noclip then for _,o in ipairs(char:GetDescendants()) do if o:IsA("BasePart") then patch("collision",o,"CanCollide",false) end end end
+        if cfg.noclip then for i=#collisionParts,1,-1 do
+            local part=collisionParts[i]
+            if not part.Parent then table.remove(collisionParts,i) elseif part.CanCollide then patch("collision",part,"CanCollide",false) end
+        end end
         if cfg.tpWalk and not cfg.fly then root.CFrame=root.CFrame+hum.MoveDirection*cfg.tpSpeed*math.min(dt,0.1) end
         if cfg.spin and not cfg.fly then root.CFrame=root.CFrame*CFrame.Angles(0,math.rad(cfg.spinSpeed)*dt,0) end
         if cfg.autoAttack and attackElapsed>=cfg.attackDelay then attackElapsed=0;if nearest(cfg.attackRange) then triggerTool() end end
@@ -1013,18 +1201,21 @@ listen(Run.Heartbeat,function(dt)
     end
     if promptElapsed>=cfg.promptDelay then promptElapsed=0;processPrompts() end
     if espElapsed>=1/cfg.espRate then espElapsed=0;updateESP() end
+    if cfg.lockOn and aimElapsed>=0.1 then aimElapsed=0;state.aimTarget=nearest(cfg.radius) end
     stepAdapters(dt)
-    if hueElapsed>=0.25 then hueElapsed=0;if cfg.rainbow then refreshTheme() end end
+    if hueElapsed>=0.15 then hueElapsed=0;if cfg.rainbow then refreshAccent() end end
 end)
 local renderBindingName="HussValleyPanelCamera_"..player.UserId
 Run:BindToRenderStep(renderBindingName,Enum.RenderPriority.Camera.Value+1,function(dt)
     if not state.alive then return end
     state.frames=state.frames+1;state.time=state.time+dt
+    if uiDirty and state.visible then applyAppearance() end
+    renderESP(dt)
     if cfg.unlockMouse then patch("mouse",Input,"MouseBehavior",Enum.MouseBehavior.Default) end
     local _,hum,root=character();local cam=workspace.CurrentCamera
     if cfg.lockOn and cam and root and hum and hum.Health>0 then
-        local target=nearest(cfg.radius)
-        if target then
+        local target=state.aimTarget
+        if target and target.Parent and (target.Position-root.Position).Magnitude<=cfg.radius then
             local predicted=target.Position+target.AssemblyLinearVelocity*cfg.prediction
             local pos=cam.CFrame.Position
             if (predicted-pos).Magnitude>0.1 then cam.CFrame=cam.CFrame:Lerp(CFrame.lookAt(pos,predicted),1-math.exp(-cfg.aimSmooth*dt)) end
@@ -1042,7 +1233,8 @@ listen(player.CharacterAdded,function()
         local char=player.Character;if not char then return end
         char:WaitForChild("HumanoidRootPart",8)
         if not state.alive or player.Character~=char then return end
-        updateFlight();applySpeed();actions.headless(cfg.headless);actions.nameHider(cfg.nameHider)
+        updateFlight();applySpeed();actions.noclip(cfg.noclip);actions.headless(cfg.headless);actions.nameHider(cfg.nameHider)
+        previewCharacter=nil;previewWorld:ClearAllChildren()
         refreshPreview();API.RefreshEmotes()
     end)
 end)
@@ -1053,6 +1245,7 @@ function API.Destroy()
     for _,c in ipairs(connections) do c:Disconnect() end
     Run:UnbindFromRenderStep(renderBindingName)
     if cameraSizeConnection then cameraSizeConnection:Disconnect() end
+    if collisionConnection then collisionConnection:Disconnect();collisionConnection=nil end
     stopFlight();API.StopEmote()
     for group in pairs(originals) do restore(group) end
     if state.capChanged and originalFPS and type(setfpscap)=="function" then pcall(setfpscap,originalFPS) end
