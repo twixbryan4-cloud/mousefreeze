@@ -1,6 +1,6 @@
 # Huss Valley Panel
 
-Versão 0.2.0 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.2.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
 
 ## Alterações da versão 0.2.0
 
@@ -18,6 +18,16 @@ Estas são reduções de trabalho verificadas em simulação; não representam u
 ## Anti-Hit
 
 O item **Combat > Anti-Hit (pendente)** informa que a proteção ainda não foi implementada nem validada. Ele não ativa sem uma integração real. O diagnóstico identifica `MeleeEvent`, `GameAction`, `MovementGuardEvent` e eventos de replicação, mas não demonstra como hits e mortes são decididos. Alterar a vida exibida ou criar um ForceField somente no cliente não provaria invulnerabilidade no servidor. O código não faz nenhuma dessas simulações de proteção e não dispara eventos com argumentos presumidos.
+
+### Registro de hits na versão 0.2.1
+
+Abra **Combat > Anti-Hit (pendente)** pelo botão **+** e escolha **Aguardar meu hit**. É possível ativar ainda no lobby: o gravador aguarda até 15 minutos, inclusive durante a partida que já está em andamento. Ele tenta detectar queda de vida, morte ou mudança de estado local que indique captura. Ao observar um desses sinais, coleta mais 5 segundos e copia o resultado. Um hit que acontecer naturalmente durante o jogo pode fornecer a amostra; não há uma janela inicial de apenas 20 segundos para esse modo.
+
+Caso o jogo use sinais diferentes dos que são observados, **Encerrar e copiar** permite obter o registro manualmente. **Gravar 20s agora** continua disponível para uma amostra curta imediata. Se a cópia automática não estiver disponível no executor, o texto aparece num campo selecionável. Depois é possível usar **Copiar último registro**.
+
+O registro inclui mudanças de vida/estado do personagem local e resumos de sete eventos relacionados a dano, captura ou controle de movimento. Enquanto aguarda, mantém um histórico curto e limita a frequência de amostragem dos eventos; após o sinal, mantém até 160 entradas. Os listeners são removidos ao concluir, encerrar ou fechar o painel, inclusive se o personagem renascer. Os handlers existentes do jogo continuam em execução. O resultado permanece local até o usuário compartilhar o texto.
+
+O registro não contém código do servidor. Eventos próximos no tempo não provam uma relação de causa, e nenhum hit é bloqueado pelo gravador. A análise serve para decidir o próximo passo; ainda não confirma a viabilidade de invulnerabilidade no cliente.
 
 ## Executar
 
