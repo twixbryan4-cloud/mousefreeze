@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.2.0
+-- Huss Valley Panel 0.2.1
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -42,7 +42,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.2.0", Config=cfg, Adapters=adapters}
+local API = {Version="0.2.1", Config=cfg, Adapters=adapters}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -293,7 +293,7 @@ local close=button(window,"x",12,{Name="Close",Position=UDim2.new(1,-34,0,8),Siz
 local quickButton=button(window,"UI",10,{Name="QuickUIButton",Position=UDim2.new(1,-94,0,8),Size=UDim2.fromOffset(25,23),BackgroundTransparency=1})
 local dragbar=create("Frame",{Name="DragBar",Position=UDim2.fromOffset(60,0),Size=UDim2.new(1,-166,0,34),BackgroundTransparency=1,Active=true},window)
 local body=create("Frame",{Name="Body",Position=UDim2.fromOffset(68,38),Size=UDim2.new(1,-82,1,-68),BackgroundTransparency=1},window)
-local footer=text(window,"HUSS VALLEY  /  v0.2.0",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
+local footer=text(window,"HUSS VALLEY  /  v0.2.1",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
 themed(footer,"TextColor3","muted")
 local fpsLabel=text(window,"-- FPS",9,{Name="FPS",Position=UDim2.new(1,-90,1,-23),Size=UDim2.fromOffset(72,14),TextXAlignment=Enum.TextXAlignment.Right})
 local floating=button(gui,"HV",13,{Name="FloatingButton",Position=UDim2.new(0,12,0.36,0),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
@@ -563,7 +563,11 @@ c=card(right,"Auto Pick","autoPick","Aciona prompts proximos de coleta (pick up,
 slider(c,"Intervalo","promptDelay",0.25,3,0.05,"s")
 pending(right,"Auto Tackle","autoTackle");pending(right,"Dash Cooldown","dashCooldown");pending(right,"Auto Ability","autoAbility")
 c=card(right,"Anti-Hit (pendente)","antiHit","Indisponivel: o diagnostico identifica os eventos, mas nao revela a validacao dos hits. Invulnerabilidade ainda nao foi implementada.")
-text(c,"Status: nao validado",10)
+local hitStatus=text(c,"Status: aguardando analise",10)
+actionButton(c,"Aguardar meu hit",function() API.StartHitDiagnostics() end)
+actionButton(c,"Gravar 20s agora",function() API.StartHitDiagnostics(false) end)
+actionButton(c,"Encerrar e copiar",function() API.StopHitDiagnostics(true) end)
+actionButton(c,"Copiar ultimo registro",function() API.CopyHitDiagnostics() end)
 left,right=page("AI",3)
 pending(left,"Runner AI","runnerAI");pending(right,"Catcher AI","catcherAI")
 local info=card(left,"Huss Valley / integracao",nil,"O caminho do mapa, zonas seguras, equipes e controles precisam ser identificados dentro do jogo. Use o diagnostico para a proxima etapa.")
@@ -644,7 +648,7 @@ actionButton(configs,"Save Config",function() API.SaveConfig(configName.Text) en
 actionButton(configs,"Load Config",function() API.LoadConfig(configName.Text) end)
 actionButton(configs,"Delete Config",function() API.DeleteConfig(configName.Text) end)
 checkbox(configs,"Auto-Load This Config On Launch","autoLoad");configExpand()
-local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.2.0")
+local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.2.1")
 actionButton(suite,"Rejoin Server",function() API.Rejoin() end)
 actionButton(suite,"Destroy Menu",function() API.Destroy() end)
 actionButton(suite,"Copiar diagnostico",function() API.ExportDiagnostics() end);suiteExpand()
@@ -1138,7 +1142,23 @@ actions.autoLoad=function(value)
 end
 
 -- Diagnostic data stays local: only paths/classes and selected game-state attributes.
+local endHitTrace
+do
 local diagnosticBox
+local function presentDiagnostic(data,message)
+    if type(setclipboard)=="function" and pcall(setclipboard,data) then notify(message or "Diagnostico copiado.")
+    else
+        if not diagnosticBox then
+            diagnosticBox=create("TextBox",{Name="DiagnosticText",Size=UDim2.fromScale(0.85,0.65),Position=UDim2.fromScale(0.075,0.15),
+                MultiLine=true,ClearTextOnFocus=false,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,
+                Font=Enum.Font.Code,TextSize=10,TextColor3=colors.text,BackgroundColor3=colors.bg,ZIndex=60},gui)
+            local dismiss=button(diagnosticBox,"Fechar",12,{Position=UDim2.new(1,-70,0,-30),Size=UDim2.fromOffset(70,26),ZIndex=61})
+            listen(dismiss.Activated,function() diagnosticBox.Visible=false end)
+        end
+        diagnosticBox.Text=data;diagnosticBox.Visible=true;diagnosticBox:CaptureFocus()
+    end
+    return data
+end
 function API.ExportDiagnostics()
     preparePrompts(true)
     local report={version=API.Version,placeId=game.PlaceId,gameId=game.GameId,remotes={},prompts={},roles={}}
@@ -1157,19 +1177,212 @@ function API.ExportDiagnostics()
         end
         report.roles[#report.roles+1]=row
     end
-    local data=Http:JSONEncode(report)
-    if type(setclipboard)=="function" and pcall(setclipboard,data) then notify("Diagnostico copiado. Envie o texto para mapear as automacoes.")
-    else
-        if not diagnosticBox then
-            diagnosticBox=create("TextBox",{Name="DiagnosticText",Size=UDim2.fromScale(0.85,0.65),Position=UDim2.fromScale(0.075,0.15),
-                MultiLine=true,ClearTextOnFocus=false,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,
-                Font=Enum.Font.Code,TextSize=10,TextColor3=colors.text,BackgroundColor3=colors.bg,ZIndex=60},gui)
-            local dismiss=button(diagnosticBox,"Fechar",12,{Position=UDim2.new(1,-70,0,-30),Size=UDim2.fromOffset(70,26),ZIndex=61})
-            listen(dismiss.Activated,function() diagnosticBox.Visible=false end)
+    return presentDiagnostic(Http:JSONEncode(report),"Diagnostico copiado. Envie o texto para mapear as automacoes.")
+end
+
+-- Short, explicitly started hit traces. Existing game handlers are never replaced.
+local hitTrace={current=nil,last=nil}
+local function traceValue(value,depth,seen)
+    local kind=typeof(value)
+    seen._nodes=(seen._nodes or 0)+1
+    if seen._nodes>64 then return {type=kind,truncated=true} end
+    if kind=="nil" then return {type="nil"}
+    elseif kind=="boolean" then return value
+    elseif kind=="number" then return value==value and math.abs(value)~=math.huge and value or "non-finite"
+    elseif kind=="string" then
+        if #value>64 then return {type="string",length=#value} end
+        local lower=string.lower(value)
+        if lower=="runner" or lower=="catcher" or lower=="chaser" or lower=="lobby" or lower=="playing" or lower=="alive" or lower=="spectating" or lower=="normal" then return value end
+        for _,word in ipairs({"damage","hit","attack","melee","tackle","caught","capture","dead","death","kill","down","reviv","invul","immune","stun","knock","ragdoll","dodge","parry","block"}) do
+            if #value<=64 and lower:find(word,1,true) then return value:gsub("[%c]","") end
         end
-        diagnosticBox.Text=data;diagnosticBox.Visible=true;diagnosticBox:CaptureFocus()
+        return {type="string",length=#value}
+    elseif kind=="Instance" then
+        local ok,path=pcall(function() return value:GetFullName() end)
+        return {type="Instance",class=value.ClassName,path=ok and path:sub(1,200) or "unavailable"}
+    elseif kind=="Vector3" or kind=="Vector2" then return {type=kind,x=traceValue(value.X,3,{}),y=traceValue(value.Y,3,{}),z=kind=="Vector3" and traceValue(value.Z,3,{}) or nil}
+    elseif kind=="CFrame" then return {type="CFrame",position=traceValue(value.Position,3,{})}
+    elseif kind=="EnumItem" then return tostring(value)
+    elseif kind=="table" then
+        if depth>=3 or seen[value] then return {type="table",truncated=true} end
+        seen[value]=true;local out,count={},0
+        for key,child in next,value do
+            count=count+1;if count>12 then out.truncated=true;break end
+            local name=(type(key)=="string" or type(key)=="number") and tostring(key):sub(1,64) or "[key]"
+            local lower=string.lower(name)
+            if lower:find("token",1,true) or lower:find("secret",1,true) or lower:find("password",1,true) or lower:find("auth",1,true) then out[name]="[redacted]"
+            else out[name]=traceValue(child,depth+1,seen) end
+        end
+        seen[value]=nil;return out
     end
-    return data
+    return {type=kind}
+end
+local function relevantAttribute(name)
+    local lower=string.lower(name)
+    if lower:find("token",1,true) or lower:find("secret",1,true) or lower:find("password",1,true) or lower:find("auth",1,true) then return false end
+    for _,part in ipairs({"health","damage","dead","alive","death","caught","captur","down","state","role","team","round","invul","immune","iframe","stun","knock","ragdoll"}) do
+        if lower:find(part,1,true) then return true end
+    end
+    return false
+end
+local function hitSnapshot()
+    local char,hum,root=character();local sample={attributes={},features={}}
+    if hum then sample.health=hum.Health;sample.maxHealth=hum.MaxHealth;sample.platformStand=hum.PlatformStand
+        local ok,s=pcall(function() return hum:GetState() end);if ok then sample.humanoidState=tostring(s) end
+    end
+    if root then sample.position=traceValue(root.Position,0,{}) end
+    for _,owner in ipairs({player,char}) do
+        if owner then for key,value in pairs(owner:GetAttributes()) do
+            if relevantAttribute(key) then sample.attributes[(owner==player and "Player." or "Character.")..key]=traceValue(value,0,{}) end
+        end end
+    end
+    for _,key in ipairs({"movement","speedBoost","fly","noclip","tpWalk","autoAttack","lockOn","antiHit"}) do sample.features[key]=cfg[key] end
+    return sample
+end
+local function recordHitEvent(ctx,kind,data)
+    if not ctx.active then return end
+    ctx.report.eventsSeen=ctx.report.eventsSeen+1
+    local limit=ctx.waiting and 20 or 160
+    if #ctx.report.events>=limit then
+        local remove=1
+        for i,event in ipairs(ctx.report.events) do if event.kind=="remote" then remove=i;break end end
+        table.remove(ctx.report.events,remove);ctx.report.eventsDropped=ctx.report.eventsDropped+1
+    end
+    ctx.report.events[#ctx.report.events+1]={t=math.floor((os.clock()-ctx.started)*1000+0.5)/1000,kind=kind,data=data}
+end
+endHitTrace=function(reason,copy)
+    local ctx=hitTrace.current
+    if not ctx then return false end
+    ctx.active=false;hitTrace.current=nil
+    for _,connection in ipairs(ctx.connections) do connection:Disconnect() end
+    for _,connection in ipairs(ctx.characterConnections) do connection:Disconnect() end
+    ctx.report.duration=math.floor((os.clock()-ctx.started)*1000+0.5)/1000
+    ctx.report.reason=reason;ctx.report.final=hitSnapshot()
+    hitTrace.last=ctx.report;API.LastHitDiagnostics=ctx.report
+    if state.alive then hitStatus.Text="Analise encerrada | quedas de vida: "..ctx.report.healthDecreases end
+    if copy and state.alive then presentDiagnostic(Http:JSONEncode(ctx.report),"Analise de hits copiada. Envie o texto aqui.") end
+    return ctx.report
+end
+local function triggerHitTrace(ctx,reason)
+    if not ctx.active or not ctx.waiting then return end
+    ctx.waiting=false;ctx.report.trigger={reason=reason,snapshot=hitSnapshot()}
+    recordHitEvent(ctx,"trigger",{reason=reason})
+    hitStatus.Text="Sinal detectado | coletando mais 5s..."
+    notify("Sinal de hit/captura registrado. A analise termina em 5 segundos.")
+    task.delay(5,function() if state.alive and hitTrace.current==ctx then endHitTrace("signalDetected",true) end end)
+end
+local function isHitAttribute(key,value,previous)
+    local lower=string.lower(key)
+    if value==true or value==1 then
+        for _,word in ipairs({"caught","captur","dead","downed","knocked","stunned"}) do if lower:find(word,1,true) then return true end end
+    end
+    if type(value)=="string" then
+        local text=string.lower(value)
+        if lower:find("state",1,true) or lower:find("status",1,true) then
+            for _,word in ipairs({"caught","captured","dead","downed","knocked","stunned"}) do if text==word then return true end end
+        end
+        if (lower=="role" or lower=="team") and type(previous)=="string" and string.lower(previous)=="runner" and (text=="catcher" or text=="chaser") then return true end
+    end
+    return false
+end
+function API.StartHitDiagnostics(waitForHit)
+    if not state.alive then return false end
+    if hitTrace.current then notify("A analise de hits ja esta gravando. Aguarde ou use Encerrar e copiar.");return false end
+    local ctx={active=true,started=os.clock(),waiting=waitForHit~=false,connections={},characterConnections={},subscribed={}}
+    ctx.report={kind="HussValleyHitTrace",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
+        mode=ctx.waiting and "waitForLocalSignal" or "record20s",
+        initial=hitSnapshot(),events={},eventsSeen=0,eventsDropped=0,healthDecreases=0,observedRemotes={},missingRemotesAtStart={},
+        capabilities={getconnections=type(getconnections)=="function",decompile=type(decompile)=="function",getscriptbytecode=type(getscriptbytecode)=="function"},
+        note="Observacao do cliente; proximidade temporal nao prova a causa do dano nem acesso a logica do servidor."}
+    hitTrace.current=ctx
+    local function attach(signal,fn,bucket)
+        bucket=bucket or ctx.connections
+        bucket[#bucket+1]=signal:Connect(function(...) if ctx.active then fn(...) end end)
+    end
+    local function watchCharacter(char)
+        for _,connection in ipairs(ctx.characterConnections) do connection:Disconnect() end
+        ctx.characterConnections={}
+        if not char then return end
+        local hum=char:FindFirstChildOfClass("Humanoid")
+        if not hum then
+            task.spawn(function()
+                local h=char:WaitForChild("Humanoid",8)
+                if ctx.active and h and player.Character==char then watchCharacter(char) end
+            end)
+            return
+        end
+        local last=hum.Health
+        local attributes=char:GetAttributes()
+        attach(hum.HealthChanged,function(value)
+            if value<last then ctx.report.healthDecreases=ctx.report.healthDecreases+1;triggerHitTrace(ctx,"healthDecreased") end
+            recordHitEvent(ctx,"health",{previous=last,current=value});last=value
+        end,ctx.characterConnections)
+        attach(hum.Died,function() triggerHitTrace(ctx,"humanoidDied");recordHitEvent(ctx,"died",hitSnapshot()) end,ctx.characterConnections)
+        attach(hum.StateChanged,function(old,new)
+            recordHitEvent(ctx,"humanoidState",{previous=tostring(old),current=tostring(new)})
+        end,ctx.characterConnections)
+        attach(char.AttributeChanged,function(key)
+            if relevantAttribute(key) then
+                local value,previous=char:GetAttribute(key),attributes[key];attributes[key]=value
+                if isHitAttribute(key,value,previous) then triggerHitTrace(ctx,"characterAttribute:"..key) end
+                recordHitEvent(ctx,"attribute",{owner="Character",name=key,previous=traceValue(previous,0,{}),value=traceValue(value,0,{})})
+            end
+        end,ctx.characterConnections)
+    end
+    local playerAttributes=player:GetAttributes()
+    attach(player.AttributeChanged,function(key)
+        if relevantAttribute(key) then
+            local value,previous=player:GetAttribute(key),playerAttributes[key];playerAttributes[key]=value
+            if isHitAttribute(key,value,previous) then triggerHitTrace(ctx,"playerAttribute:"..key) end
+            recordHitEvent(ctx,"attribute",{owner="Player",name=key,previous=traceValue(previous,0,{}),value=traceValue(value,0,{})})
+        end
+    end)
+    attach(player.CharacterAdded,function(char) recordHitEvent(ctx,"respawn",{});watchCharacter(char) end)
+    watchCharacter(player.Character)
+    local paths={"chrono.Shared.Remotes.Death","ChickenOrHero.Game.GameAction","ChickenOrHero.Game.MeleeEvent",
+        "ChickenOrHero.Game.HitReplayEvent","ChickenOrHero.Game.RescueEvent","ChickenOrHero.Game.TeamEventRemote",
+        "ChickenOrHero.Presentation.MovementGuardEvent"}
+    local wanted={};for _,path in ipairs(paths) do wanted["ReplicatedStorage."..path]=true end
+    local function subscribe(remote)
+        if ctx.subscribed[remote] or not (remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent")) then return end
+        local path=remote:GetFullName();if not wanted[path] then return end
+        ctx.subscribed[remote]=true;ctx.report.observedRemotes[#ctx.report.observedRemotes+1]=path
+        local lastSample=-math.huge
+        attach(remote.OnClientEvent,function(...)
+            local now=os.clock()
+            if ctx.waiting and now-lastSample<0.25 then return end
+            lastSample=now
+            local args=table.pack(...);local data={remote=path,argumentCount=args.n,arguments={}}
+            local seen={};for i=1,math.min(args.n,8) do data.arguments[i]=traceValue(args[i],0,seen) end
+            recordHitEvent(ctx,"remote",data)
+        end)
+    end
+    for _,path in ipairs(paths) do
+        local object=Replicated
+        for segment in path:gmatch("[^%.]+") do object=object and object:FindFirstChild(segment) end
+        if object then subscribe(object) else ctx.report.missingRemotesAtStart[#ctx.report.missingRemotesAtStart+1]="ReplicatedStorage."..path end
+    end
+    attach(Replicated.DescendantAdded,subscribe)
+    if ctx.waiting then
+        hitStatus.Text="Aguardando seu hit | limite: 15 min"
+        notify("Analise armada. Jogue normalmente; ela aguarda um sinal de dano/captura por ate 15 minutos.")
+        task.delay(900,function() if state.alive and hitTrace.current==ctx and ctx.waiting then endHitTrace("waitTimeout",true) end end)
+    else
+        hitStatus.Text="Gravando por 20s..."
+        notify("Gravacao de 20 segundos iniciada.")
+        task.delay(20,function() if state.alive and hitTrace.current==ctx then endHitTrace("timeout",true) end end)
+    end
+    return true
+end
+function API.StopHitDiagnostics(copy)
+    local result=endHitTrace("manual",copy~=false)
+    if not result and state.alive then notify("Nenhuma analise em andamento.") end
+    return result
+end
+function API.CopyHitDiagnostics()
+    if not hitTrace.last then notify("Grave uma analise de hits primeiro.");return false end
+    return presentDiagnostic(Http:JSONEncode(hitTrace.last),"Analise de hits copiada. Envie o texto aqui.")
+end
 end
 
 -- One heartbeat and one late camera update. Expensive work is rate-limited.
@@ -1241,6 +1454,7 @@ end)
 function API.Destroy()
     if not state.alive then return end
     state.alive=false;perfToken=perfToken+1;xrayToken=xrayToken+1
+    endHitTrace("panelClosed",false)
     for key,name in pairs(requiresAdapter) do if cfg[key] and type(adapters[name])=="function" then pcall(adapters[name],{Enabled=false,Player=player,Config=cfg}) end end
     for _,c in ipairs(connections) do c:Disconnect() end
     Run:UnbindFromRenderStep(renderBindingName)
