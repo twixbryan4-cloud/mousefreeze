@@ -1,6 +1,37 @@
 # Huss Valley Panel
 
-Versão 0.2.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.3.0 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Gravador geral na versão 0.3.0
+
+Abra **Config > Gravador geral** pelo botão **+** e toque em **Iniciar gravação geral**. Também há **Gravar rodada inteira** em Combat > Anti-Hit. Pode começar no lobby: esse modo fica ligado por até 30 minutos, acompanha respawns e continua gravando após dano ou morte.
+
+A barra superior permanece disponível quando o menu é minimizado. Logo após cada situação, use **Hit**, **Caí**, **Matei**, **Zona**, **Revivi** ou **Habil.** para associar o que aconteceu na tela ao horário e ao estado do personagem. Os marcadores são relatos manuais: não significam que o painel já identificou a regra interna do jogo. Tente incluir uma ação por vez e deixe alguns segundos entre elas. Uma amostra como runner e outra como catcher podem fornecer informações diferentes.
+
+O gravador acompanha:
+
+- Vida, morte, estados do Humanoid, atributos relevantes do jogador/personagem, time e respawns.
+- Posição, velocidade e ferramenta equipada nos snapshots e marcadores.
+- Ativação de ferramentas, prompts acionados pelo jogador local e mudanças nos valores de `leaderstats`.
+- Valores de estado e atributos publicados em `ChickenOrHero`/`ChickenOrHero.Game` e remotes de gameplay, habilidades, progressão, emotes, recompensas e demais grupos incluídos.
+- Contatos físicos do HumanoidRootPart com peças cujos caminhos contenham zone, safe, finish ou checkpoint. São pistas com posição/tamanho da peça; zonas calculadas por região ou com outros nomes podem não produzir esse evento.
+- Eventos recebidos e, quando o executor permitir, argumentos das chamadas de saída `:FireServer(...)` e `:InvokeServer(...)`. A observação não dispara chamadas adicionais nem altera argumentos ou resultados.
+
+A captura de saída requer `getrawmetatable`, `getnamecallmethod`, `setreadonly`, `isreadonly` e `newcclosure`. O status/relatório informa `installed`, `chainReused`, `unavailable` ou `setupFailed`. A presença dessas APIs não prova compatibilidade com a versão do Delta instalada. Chamadas feitas diretamente como `remote.FireServer(remote, ...)` podem passar fora do observador; respostas de RemoteFunction e callbacks `OnClientInvoke` não são registrados. Quando o executor não permite observar a saída, os outros coletores continuam funcionando.
+
+### Copiar ou salvar o resultado
+
+1. Use **Parar** na barra superior ou **Encerrar e copiar** no cartão. O painel copia a primeira parte do JSON e mostra `parte 1/N`.
+2. Envie essa parte e use **Copiar próxima parte** para copiar as seguintes, até enviar todas. Cada mensagem leva um identificador da sessão e sua numeração. As partes são fragmentos, na ordem, de um único JSON.
+3. **Copiar tudo** copia o registro completo. **Salvar JSON** cria `huss-valley-trace-<sessão>.json` nos arquivos do executor, quando há `writefile`; também é possível enviar esse arquivo inteiro. Sem clipboard, há um campo selecionável.
+
+O registro é limitado a 600 eventos, priorizando preservar marcadores e mudanças locais ao descartar eventos remotos/estados antigos. Eventos recebidos são amostrados até quatro vezes por segundo por endpoint; os de saída, até oito. Os contadores registram chamadas observadas e amostras omitidas. Um burst pode omitir uma ação específica; se isso acontecer, uma gravação curta focada nessa ação ajuda a reduzir a ambiguidade. Há limites adicionais de 160 remotes, 100 valores, oito argumentos, profundidade de tabela de três níveis, 12 campos por tabela e strings de até 96 bytes; valores maiores são resumidos. As partes copiadas têm até 9.000 bytes de JSON, além do cabeçalho, sem dividir caracteres UTF-8.
+
+Chat, remotes administrativos/privados, áudio, bots e replicação contínua não são coletados. Textos curtos dos remotes de gameplay incluídos são preservados para mapear ações; chaves como token, secret, password e auth são omitidas/redigidas. O resultado permanece no dispositivo até ser compartilhado pelo usuário. Nenhum código do servidor é obtido, e proximidade temporal entre eventos não prova a causa de um hit ou uma eliminação.
+
+Ao encerrar, os listeners são desconectados. O observador de saída restaura a função anterior quando ainda ocupa o topo da cadeia; se outro script adicionou um observador depois, a coleta é desativada sem remover o script posterior. Essa ponte inativa é reaproveitada em vez de empilhar novas pontes a cada gravação.
+
+API adicional: `StartGeneralDiagnostics()`, `MarkDiagnostics("Zona")`, `StopHitDiagnostics(true)`, `CopyNextDiagnosticsPart(indiceOpcional)`, `CopyHitDiagnostics()` e `SaveDiagnostics()`. O último resultado geral fica em `LastGeneralDiagnostics`. As funções de gameplay pendentes continuam precisando de integrações confirmadas; gravar um evento não as implementa automaticamente.
 
 ## Alterações da versão 0.2.0
 
@@ -61,6 +92,8 @@ Para a próxima etapa, execute o painel no jogo e use **Config > Suite > Copiar 
 O ponto de integração é `getgenv().HussValleyPanel.RegisterAction(nome, callback)`. Os nomes esperados constam em `requiresAdapter` no código. O callback recebe `Enabled`, `Player` e `Config`; durante a execução recebe também `Character`, `Delta` e `IsActive()`. Adaptadores que cedem a execução devem conferir `IsActive()` antes de continuar. A desativação e o encerramento chamam o callback com `Enabled = false`.
 
 ## Validação e ciclo de vida
+
+A versão 0.3.0 foi verificada com APIs simuladas para continuidade durante lobby/dano/morte/respawn, coleta de remotes e valores tardios, filtros, limites, marcadores e limpeza. A captura de saída preservou argumentos, nils, retornos, erros e o comportamento de espera simulado de InvokeServer; foram verificados restauração, coexistência com um observador posterior e fallback sem APIs. A exportação foi verificada com JSON longo contendo UTF-8, recomposição exata das partes, salvamento, campo selecionável e isolamento de timers de sessões anteriores. Esses testes não executam o motor Roblox nem o Delta.
 
 Foram verificados a sintaxe e os fluxos de controles usando APIs simuladas: construção das oito categorias, navegação, expansão, toque, validação de valores, bloqueio de recursos sem integração, movimento, colisão, câmera, ESP, configurações, restauração, encerramento e reexecução. A versão 0.2 também verifica transparência dos cartões, dimensões da tela, avisos opcionais, migração de configurações, novos membros do personagem, reaproveitamento do preview, interpolação e restauração após respawn. Isso não substitui o teste no Roblox/Delta; não há uma sessão desse jogo disponível neste ambiente.
 
