@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.3.1
+-- Huss Valley Panel 0.4.0
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -24,7 +24,7 @@ local defaults = {
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
     autoRevive=false, autoPick=false, promptDelay=0.6,
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
-    autoAbility=false, runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
+    autoAbility=false, dashSide="Right",tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
     autoVote=false, disableGameAFK=false, antiIdle=false, antiHit=false,
     esp=false, boxes=true, names=true, tracers=false, health=true, distance=true,
     skeleton=false, headDot=false, healthText=false, roleColors=true, teamFilter=false,
@@ -42,7 +42,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.3.1", Config=cfg, Adapters=adapters}
+local API = {Version="0.4.0", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -228,7 +228,7 @@ local requiresAdapter={autoDash="AutoDash",autoZone="AutoZone",autoDown="AutoDow
     hitbox="HitBox",leaderboard="LeaderboardVisuals",gems="GemsAndCoins",antiHit="AntiHit"}
 local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
     prediction={0,0.5},aimSmooth={1,25},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
-    promptDelay={0.25,3},espRange={50,3000},espRate={2,30},fpsCap={30,240},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85}}
+    promptDelay={0.25,3},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85}}
 local function valid(key,value)
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
     if type(value)=="number" then
@@ -236,6 +236,7 @@ local function valid(key,value)
         local r=ranges[key]; if r then value=math.clamp(value,r[1],r[2]) end
     elseif key=="theme" and value~="Dark" and value~="Black" then return false
     elseif key=="accent" and not palette[value] then return false
+    elseif key=="dashSide" and value~="Right" and value~="Left" then return false
     elseif key=="toggleKey" then
         local ok,k=pcall(function() return Enum.KeyCode[value] end)
         if not ok or not k or k==Enum.KeyCode.Unknown then return false end
@@ -293,7 +294,7 @@ local close=button(window,"x",12,{Name="Close",Position=UDim2.new(1,-34,0,8),Siz
 local quickButton=button(window,"UI",10,{Name="QuickUIButton",Position=UDim2.new(1,-94,0,8),Size=UDim2.fromOffset(25,23),BackgroundTransparency=1})
 local dragbar=create("Frame",{Name="DragBar",Position=UDim2.fromOffset(60,0),Size=UDim2.new(1,-166,0,34),BackgroundTransparency=1,Active=true},window)
 local body=create("Frame",{Name="Body",Position=UDim2.fromOffset(68,38),Size=UDim2.new(1,-82,1,-68),BackgroundTransparency=1},window)
-local footer=text(window,"HUSS VALLEY  /  v0.3.1",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
+local footer=text(window,"HUSS VALLEY  /  v0.4.0",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
 themed(footer,"TextColor3","muted")
 local fpsLabel=text(window,"-- FPS",9,{Name="FPS",Position=UDim2.new(1,-90,1,-23),Size=UDim2.fromOffset(72,14),TextXAlignment=Enum.TextXAlignment.Right})
 local floating=button(gui,"HV",13,{Name="FloatingButton",Position=UDim2.new(0,12,0.36,0),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
@@ -556,12 +557,18 @@ slider(c,"Smoothness","aimSmooth",1,25,1);checkbox(c,"Auto Face Target","faceTar
 c=card(left,"Auto Use Gears","autoGears","Usa a ferramenta equipada. Nao compra nem inventa ferramentas.")
 slider(c,"Intervalo","gearDelay",0.2,10,0.1,"s")
 pending(left,"Auto Down","autoDown")
-pending(right,"Auto Dash","autoDash")
-c=card(right,"Auto Attack","autoAttack","Ativa a ferramenta equipada quando um jogador entra no alcance.")
+c=card(right,"Auto Dash","autoDash","Dash lateral enquanto voce se move na partida. Aguarda a disponibilidade do jogo.")
+cycle(c,"Lado no movimento","dashSide",{"Right","Left"});API.NativeStatusLabels.dash=text(c,"Status: aguardando partida",9)
+c=card(right,"Auto Attack","autoAttack","Ataque do jogo contra runners proximos quando voce e catcher. Aguarda a resposta e o intervalo do jogo.")
 slider(c,"Range","attackRange",2,50,1," studs");slider(c,"Delay","attackDelay",0.15,3,0.05,"s")
+API.NativeStatusLabels.attack=text(c,"Status: aguardando partida",9)
 c=card(right,"Auto Pick","autoPick","Aciona prompts proximos de coleta (pick up, collect, coletar). Precisa de fireproximityprompt no executor.")
 slider(c,"Intervalo","promptDelay",0.25,3,0.05,"s")
-pending(right,"Auto Tackle","autoTackle");pending(right,"Dash Cooldown","dashCooldown");pending(right,"Auto Ability","autoAbility")
+c=card(right,"Auto Tackle","autoTackle","Tackle contra runners proximos quando voce e catcher. O jogo continua decidindo a captura.")
+slider(c,"Alcance","tackleRange",2,12,0.5," studs");API.NativeStatusLabels.tackle=text(c,"Status: aguardando partida",9)
+pending(right,"Dash Cooldown","dashCooldown")
+c=card(right,"Auto Ability","autoAbility","Usa a habilidade equipada quando um oponente esta perto. Aguarda a disponibilidade do jogo.")
+slider(c,"Distancia do oponente","abilityRange",2,40,1," studs");API.NativeStatusLabels.ability=text(c,"Status: aguardando partida",9)
 c=card(right,"Anti-Hit (pendente)","antiHit","Indisponivel: o diagnostico identifica os eventos, mas nao revela a validacao dos hits. Invulnerabilidade ainda nao foi implementada.")
 local hitStatus=text(c,"Status: aguardando analise",10)
 actionButton(c,"Aguardar meu hit",function() API.StartHitDiagnostics() end)
@@ -578,8 +585,8 @@ left,right=page("ESP",4)
 c=card(left,"Players","esp","Marcadores locais. Atualizacao limitada para reduzir o custo no celular.")
 for _,v in ipairs({{"Boxes","boxes"},{"Names","names"},{"Tracers","tracers"},{"Health","health"},{"Distance","distance"},
     {"Skeleton","skeleton"},{"Head Dot","headDot"},{"Health Text","healthText"}}) do checkbox(c,v[1],v[2]) end
-c=card(left,"Roles & Threat",nil,"Cores por time quando o jogo publica equipes; sem deduzir papeis privados.")
-checkbox(c,"Team colors","roleColors");checkbox(c,"Ignorar mesmo time","teamFilter")
+c=card(left,"Roles & Threat",nil,"Cores por papel publicado pelo jogo: catcher em vermelho e runner em verde. Usa o time quando nao ha papel disponivel.")
+checkbox(c,"Cores por papel / time","roleColors");checkbox(c,"Ignorar mesmo time","teamFilter")
 c=card(left,"Appearance",nil);cycle(c,"Accent","accent",{"Peach","Purple","Blue","Pink","Green"})
 card(left,"View Tracer","viewTracer","Mostra a direcao em que os outros jogadores olham.")
 pending(left,"Leaderboard Visuals","leaderboard")
@@ -671,7 +678,7 @@ actionButton(configs,"Save Config",function() API.SaveConfig(configName.Text) en
 actionButton(configs,"Load Config",function() API.LoadConfig(configName.Text) end)
 actionButton(configs,"Delete Config",function() API.DeleteConfig(configName.Text) end)
 checkbox(configs,"Auto-Load This Config On Launch","autoLoad");configExpand()
-local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.3.1")
+local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.4.0")
 actionButton(suite,"Rejoin Server",function() API.Rejoin() end)
 actionButton(suite,"Destroy Menu",function() API.Destroy() end)
 actionButton(suite,"Copiar diagnostico",function() API.ExportDiagnostics() end);suiteExpand()
@@ -854,7 +861,11 @@ listen(Players.PlayerRemoving,function(p)
     actorCache[p]=nil
     for i=#roster,1,-1 do if roster[i]==p then table.remove(roster,i) end end
 end)
-local function sameTeam(p) return player.Team~=nil and p.Team==player.Team end
+local function sameTeam(p)
+    local mine,other=player:GetAttribute("GameRole"),p:GetAttribute("GameRole")
+    if (mine=="Runner" or mine=="Catcher") and (other=="Runner" or other=="Catcher") then return mine==other end
+    return player.Team~=nil and p.Team==player.Team
+end
 local function nearest(radius)
     local _,_,root=character();if not root then return end
     local target,best
@@ -913,7 +924,8 @@ local function checkPromptCapability(v)
     if v then preparePrompts() end
 end
 actions.autoPick=checkPromptCapability;actions.autoRevive=checkPromptCapability
-local function triggerTool()
+local function triggerTool(attack)
+    if attack and API.Native and API.Native.HasMelee() then return API.Native.AttackNearest(cfg.attackRange) end
     local char=player.Character;local tool=char and char:FindFirstChildOfClass("Tool")
     if tool then tool:Activate() end
 end
@@ -938,6 +950,175 @@ for key,name in pairs(requiresAdapter) do actions[key]=function(v)
     activeAdapters[key]=v and name or nil
     if not v and type(adapters[name])=="function" then adapters[name]({Player=player,Config=cfg,Enabled=false}) end
 end end
+-- Native commands transcribed from the user's runtime trace, never enabled by default.
+do
+    local N={Status={},Mapped={}}
+    API.Native=N
+    local paths={melee="ChickenOrHero.Game.MeleeEvent",tackle="ChickenOrHero.Game.GameAction",
+        ability="ChickenOrHero.Gear.GearEvent",dash="ChickenOrHero.Presentation.BoostRequest",replay="ChickenOrHero.Game.HitReplayEvent"}
+    local cached,bound,pending,recent,readyAt,lastAttempt={},{},{},{},{},{}
+    local roleColors={Catcher=Color3.fromRGB(244,115,125),Runner=Color3.fromRGB(110,212,172)}
+    local function finite(value) return type(value)=="number" and value==value and math.abs(value)~=math.huge end
+    local function status(kind,message)
+        local row=N.Status[kind] or {sent=0,accepted=0,rejected=0,timeouts=0,failed=0};N.Status[kind]=row;row.message=message
+        local label=API.NativeStatusLabels[kind]
+        if state.alive and label and label.Text~=message then label.Text=message end
+        return row
+    end
+    local function remote(kind)
+        if game.GameId~=10764627709 then return end
+        local object=cached[kind];if object and object.Parent then return object end
+        object=Replicated
+        for segment in paths[kind]:gmatch("[^%.]+") do object=object and object:FindFirstChild(segment) end
+        if object and object:IsA("RemoteEvent") then cached[kind]=object;return object end
+    end
+    local function clock()
+        local ok,value=pcall(function() return workspace:GetServerTimeNow() end)
+        if ok and finite(value) then return value end
+    end
+    local function flatUnit(value)
+        if typeof(value)~="Vector3" or not finite(value.X) or not finite(value.Z) then return end
+        local horizontal=Vector3.new(value.X,0,value.Z)
+        if horizontal.Magnitude>0.001 then return horizontal.Unit end
+    end
+    function N.GameRole(p)
+        local role=p:GetAttribute("GameRole")
+        if role=="Runner" or role=="Catcher" then return role end
+    end
+    function N.ESPColor(p)
+        local role=N.GameRole(p)
+        return role and roleColors[role] or (p.Team and p.TeamColor.Color) or accent
+    end
+    local function active(kind,requiredRole)
+        if not state.alive then return end
+        local char,hum,root=character();local role=N.GameRole(player)
+        if not char or not hum or not root or hum.Health<=0 or player:GetAttribute("RunState")~="Active" or not role or (requiredRole and role~=requiredRole) then
+            status(kind,"Aguardando papel e rodada ativos");return
+        end
+        return char,hum,root,role
+    end
+    local function opponent(root,radius,role)
+        local target,best=nil,radius*radius
+        for _,p in ipairs(roster) do
+            local run,targetRole=p:GetAttribute("RunState"),N.GameRole(p)
+            if p~=player and targetRole~=role and targetRole~=nil and (run==nil or run=="Active") then
+                local a=actor(p)
+                if a.hum and a.root and a.hum.Health>0 then
+                    local delta=a.root.Position-root.Position;local distance=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z
+                    if distance<best then best=distance;target=a.root end
+                end
+            end
+        end
+        return target
+    end
+    local function cancel(kind)
+        pending[kind]=nil;status(kind,"Desativado")
+    end
+    local function available(kind,serverNow,attribute)
+        local request=pending[kind]
+        if request then
+            if os.clock()-request.started<5 then status(kind,"Aguardando resposta do jogo");return false end
+            pending[kind]=nil;local row=status(kind,"Resposta nao observada");row.timeouts=row.timeouts+1
+        end
+        if os.clock()-(lastAttempt[kind] or -math.huge)<(kind=="attack" and 0.85 or 1.1) then return false end
+        local untilTime=readyAt[kind] or 0
+        if attribute then local value=player:GetAttribute(attribute);if finite(value) then untilTime=math.max(untilTime,value) end end
+        if serverNow<untilTime then status(kind,"Aguardando disponibilidade do jogo");return false end
+        return true
+    end
+    local function send(kind,r,id,...)
+        local now=os.clock();lastAttempt[kind]=now
+        for key,entry in pairs(recent) do if now-entry.at>10 then recent[key]=nil end end
+        if id then pending[kind]={id=id,started=now};recent[id]={kind=kind,at=now} end
+        local row=status(kind,"Comando enviado; aguardando o jogo")
+        local ok=pcall(function(...) r:FireServer(...) end,...)
+        if not ok then pending[kind]=nil;row.failed=row.failed+1;status(kind,"Nao foi possivel enviar o comando");return false end
+        row.sent=row.sent+1
+        return true
+    end
+    local function acknowledge(kind,id,accepted,data)
+        local request=pending[kind]
+        if not request or request.id~=id or type(accepted)~="boolean" then return end
+        pending[kind]=nil
+        if type(data)=="table" then
+            if finite(data.readyAt) then readyAt[kind]=math.max(readyAt[kind] or 0,data.readyAt) end
+            if type(data.canonicalId)=="string" then recent[data.canonicalId]={kind=kind,at=os.clock()} end
+        end
+        local row=status(kind,accepted and "Pedido aceito pelo jogo" or "Pedido recusado pelo jogo")
+        row[accepted and "accepted" or "rejected"]=row[accepted and "accepted" or "rejected"]+1
+        if not accepted then local now=clock();if now then readyAt[kind]=math.max(readyAt[kind] or 0,now+2) end end
+    end
+    local function bind(kind,callback)
+        local r=remote(kind)
+        if r and not bound[r] then bound[r]=true;listen(r.OnClientEvent,callback) end
+    end
+    function N.HasMelee() return remote("melee")~=nil end
+    function N.AttackNearest(radius)
+        local _,_,root,role=active("attack","Catcher");if not root then return false end
+        local r,now=remote("melee"),clock();if not r or not now or not available("attack",now) then return false end
+        local target=opponent(root,radius or cfg.attackRange,role);if not target then status("attack","Nenhum runner ativo no alcance");return false end
+        local direction=flatUnit(target.Position-root.Position);if not direction then return false end
+        local id=Http:GenerateGUID(false)
+        return send("attack",r,id,{id=id,direction=direction,at=now,position=root.Position})
+    end
+    function N.Tackle()
+        local _,_,root,role=active("tackle","Catcher");if not root then return false end
+        local r,now=remote("tackle"),clock();if not r or not now or not available("tackle",now,"TackleReadyAt") then return false end
+        local target=opponent(root,cfg.tackleRange,role);if not target then status("tackle","Nenhum runner ativo no alcance");return false end
+        local direction=flatUnit(target.Position-root.Position);if not direction then return false end
+        local velocity=root.AssemblyLinearVelocity;local speed=Vector3.new(velocity.X,0,velocity.Z).Magnitude
+        if not finite(speed) then return false end
+        local id=Http:GenerateGUID(false)
+        return send("tackle",r,id,"Tackle",{id=id,at=now,direction=direction,position=root.Position,speed=speed})
+    end
+    function N.UseAbility()
+        local _,_,root,role=active("ability");if not root then return false end
+        local r,now=remote("ability"),clock();if not r or not now or not available("ability",now,"AbilityReadyAt") then return false end
+        for _,attribute in ipairs({"GhostAbilityReadyAt","CloneAbilityReadyAt","TruckAbilityReadyAt"}) do
+            local value=player:GetAttribute(attribute);if finite(value) and value>now then status("ability","Aguardando disponibilidade do jogo");return false end
+        end
+        local target=opponent(root,cfg.abilityRange,role);if not target then status("ability","Nenhum oponente ativo por perto");return false end
+        local direction=flatUnit(target.Position-root.Position);if not direction then return false end
+        local id=Http:GenerateGUID(false)
+        return send("ability",r,id,"UseAbility",nil,direction,id,nil,nil)
+    end
+    function N.Dash()
+        local char,hum=active("dash");if not char then return false end
+        local r=remote("dash");if not r then return false end
+        if char:GetAttribute("DashReady")~=true or os.clock()-(lastAttempt.dash or -math.huge)<0.85 then status("dash","Aguardando dash disponivel");return false end
+        local from=flatUnit(hum.MoveDirection);if not from then status("dash","Aguardando movimento");return false end
+        local side=Vector3.new(-from.Z,0,from.X)*(cfg.dashSide=="Right" and 1 or -1)
+        return send("dash",r,nil,from,side)
+    end
+    local function perform(ctx,kind,fn)
+        if ctx.Enabled then if not ctx.IsActive or ctx.IsActive() then fn() end else cancel(kind) end
+    end
+    local function install()
+        if remote("dash") and type(adapters.AutoDash)~="function" then adapters.AutoDash=function(ctx) perform(ctx,"dash",N.Dash) end end
+        if remote("tackle") and type(adapters.AutoTackle)~="function" then adapters.AutoTackle=function(ctx) perform(ctx,"tackle",N.Tackle) end end
+        if remote("ability") and type(adapters.AutoAbility)~="function" then adapters.AutoAbility=function(ctx) perform(ctx,"ability",N.UseAbility) end end
+        N.Mapped.attack=remote("melee")~=nil;N.Mapped.dash=remote("dash")~=nil;N.Mapped.tackle=remote("tackle")~=nil;N.Mapped.ability=remote("ability")~=nil
+        bind("melee",function(id,accepted,data) acknowledge("attack",id,accepted,data) end)
+        bind("tackle",function(action,id,accepted,data) if action=="TackleResult" then acknowledge("tackle",id,accepted,data) end end)
+        bind("ability",function(action,data)
+            if action=="PredictionResult" and type(data)=="table" then acknowledge("ability",data.requestId,data.accepted,data) end
+        end)
+        bind("replay",function(action,data)
+            if action~="Verdict" or type(data)~="table" or data.source~="Server" then return end
+            local request=recent[data.id];if not request or os.clock()-request.at>10 then return end
+            local row=status(request.kind,data.accepted and "Acerto confirmado pelo servidor" or "Acerto recusado: "..tostring(data.reason))
+            row.lastVerdict={accepted=data.accepted,reason=data.reason,source=data.source}
+        end)
+    end
+    actions.autoAttack=function(value) if not value then cancel("attack") end end
+    if game.GameId==10764627709 then
+        install()
+        listen(player.CharacterAdded,function() pending={};recent={} end)
+        listen(Replicated.DescendantAdded,function(object)
+            if object:IsA("RemoteEvent") and (object.Name=="MeleeEvent" or object.Name=="GameAction" or object.Name=="GearEvent" or object.Name=="BoostRequest" or object.Name=="HitReplayEvent") then install() end
+        end)
+    end
+end
 listen(player.Idled,function()
     if not cfg.antiIdle then return end
     local ok=pcall(function()
@@ -1007,7 +1188,7 @@ local function updateESP()
             local eligible=root and h and h.Health>0 and dist<=cfg.espRange and not(cfg.teamFilter and sameTeam(p))
             if not eligible then clearRecord(p)
             else
-                local r=recordFor(p);local color=cfg.roleColors and p.Team and p.TeamColor.Color or accent
+                local r=recordFor(p);local color=cfg.roleColors and API.Native.ESPColor(p) or accent
                 writeChanged(r.highlight,"Enabled",cfg.chams);writeChanged(r.highlight,"Adornee",ch);writeChanged(r.highlight,"FillColor",color);writeChanged(r.highlight,"OutlineColor",color)
                 local center,on=cam:WorldToViewportPoint(root.Position)
                 writeChanged(r.frame,"Visible",on and (cfg.esp or cfg.viewTracer))
@@ -1210,6 +1391,23 @@ local function traceClip(value,limit)
     while limit>0 and string.byte(value,limit+1)>=128 and string.byte(value,limit+1)<192 do limit=limit-1 end
     return string.sub(value,1,limit)
 end
+function hitTrace.actionTag(first,second)
+    if type(first)=="table" then first=rawget(first,"action") or rawget(first,"Action") or rawget(first,"command") or rawget(first,"type") or rawget(first,"op") end
+    if type(first)~="string" or #first>96 then return "" end
+    local tag=string.gsub(first,"[%c]","")
+    if #tag==36 and string.match(tag,"^%x+%-%x+%-%x+%-%x+%-%x+$") then
+        if type(second)=="boolean" then return second and "[request-id]:accepted" or "[request-id]:rejected" end
+        return type(second)=="string" and #second<=32 and string.gsub(second,"[%c]","") or "[request-id]"
+    end
+    if (tag=="Verdict" or tag=="PredictionResult" or tag=="FX") and type(second)=="table" then
+        for _,name in ipairs({"item","kind","reason"}) do
+            local value=rawget(second,name)
+            if type(value)=="string" and #value<=32 then tag=tag..":"..string.gsub(value,"[%c]","") end
+        end
+        if type(rawget(second,"accepted"))=="boolean" then tag=tag..":"..tostring(rawget(second,"accepted")) end
+    end
+    return tag
+end
 local function traceValue(value,depth,seen,gameStrings)
     local kind=typeof(value)
     seen._nodes=(seen._nodes or 0)+1
@@ -1268,11 +1466,15 @@ local function hitSnapshot(gameStrings)
             if relevantAttribute(key) then sample.attributes[(owner==player and "Player." or "Character.")..key]=traceValue(value,0,{},gameStrings) end
         end end
     end
-    for _,key in ipairs({"movement","speedBoost","fly","noclip","tpWalk","autoAttack","lockOn","antiHit"}) do sample.features[key]=cfg[key] end
+    for _,key in ipairs({"movement","speedBoost","fly","noclip","tpWalk","autoAttack","autoDash","autoTackle","autoAbility","lockOn","antiHit"}) do sample.features[key]=cfg[key] end
+    if API.Native then
+        sample.native={}
+        for name,row in pairs(API.Native.Status) do sample.native[name]={sent=row.sent,accepted=row.accepted,rejected=row.rejected,timeouts=row.timeouts,failed=row.failed,message=row.message} end
+    end
     return sample
 end
-local traceReserves={outbound=180,inbound=140,critical=100,state=80,telemetry=100}
-local function traceGroup(kind,data)
+hitTrace.reserves={outbound=180,inbound=140,critical=100,state=80,telemetry=100}
+function hitTrace.group(kind,data)
     if kind=="remote" then return data.direction=="out" and "outbound" or "inbound" end
     if kind=="humanoidState" then
         for _,word in ipairs({"Dead","FallingDown","Ragdoll","GettingUp"}) do
@@ -1295,15 +1497,15 @@ local function recordHitEvent(ctx,kind,data)
     if not ctx.active then return end
     ctx.report.eventsSeen=ctx.report.eventsSeen+1
     local limit=ctx.general and 600 or (ctx.waiting and 20 or 160)
-    local group=ctx.general and traceGroup(kind,data) or nil
+    local group=ctx.general and hitTrace.group(kind,data) or nil
     if #ctx.report.events>=limit then
         local remove=1
         if ctx.general then
             -- Each class borrows unused space, but cannot evict another class below its reserve.
             local victim=group
-            if (ctx.report.retainedByGroup[group] or 0)<traceReserves[group] then
+            if (ctx.report.retainedByGroup[group] or 0)<hitTrace.reserves[group] then
                 local largest=0
-                for candidate,reserve in pairs(traceReserves) do
+                for candidate,reserve in pairs(hitTrace.reserves) do
                     local excess=(ctx.report.retainedByGroup[candidate] or 0)-reserve
                     if excess>largest then largest=excess;victim=candidate end
                 end
@@ -1377,9 +1579,14 @@ function API.CopyActionDiagnostics()
     local markers={}
     for _,event in ipairs(report.events) do if event.kind=="marker" then markers[#markers+1]=event end end
     while #markers>24 do table.remove(markers,1) end
+    local samples={}
+    for _,row in ipairs(report.remoteSamples) do
+        samples[#samples+1]={remote=row.remote,direction=row.direction,action=row.action,first=row.first,
+            latest=row.latest and row.latest.seq~=row.first.seq and row.latest or nil}
+    end
     local summary={kind="HussValleyActionSummary",version=report.version,session=report.session,placeId=report.placeId,gameId=report.gameId,
         duration=report.duration,reason=report.reason,capabilities=report.capabilities,collectorErrors=report.collectorErrors,
-        initial=report.initial,final=report.final,remoteStats=report.remoteStats,remoteSamples=report.remoteSamples,markers=markers,
+        initial=report.initial,final=report.final,remoteStats=report.remoteStats,remoteSamples=samples,markers=markers,
         eventsSeen=report.eventsSeen,eventsDropped=report.eventsDropped,eventsCoalesced=report.eventsCoalesced,healthDecreases=report.healthDecreases,
         remoteSampleEventsOmitted=report.remoteSampleEventsOmitted,
         note="Resumo de amostras inicial/recente por endpoint, direcao e acao. Nao substitui o historico completo, disponivel em Salvar JSON."}
@@ -1611,9 +1818,8 @@ function API.StartHitDiagnostics(waitForHit)
         local event=recordHitEvent(ctx,"remote",data)
         if ctx.general then
             -- Keep first/latest samples per action independently of chronological event eviction.
-            local first=select(1,...)
-            if type(first)=="table" then first=rawget(first,"action") or rawget(first,"Action") or rawget(first,"command") or rawget(first,"type") or rawget(first,"op") end
-            local tag=type(first)=="string" and #first<=96 and string.gsub(first,"[%c]","") or ""
+            local first,second=select(1,...)
+            local tag=hitTrace.actionTag(first,second)
             local sampleKey=key.."\0"..tag
             local samples=ctx.remoteSampleGroups[sampleKey]
             if not samples and #ctx.report.remoteSamples<64 then
@@ -1687,7 +1893,7 @@ function API.StartHitDiagnostics(waitForHit)
             if who==player then recordHitEvent(ctx,"prompt",{prompt=traceValue(prompt,0,{}),action=traceValue(prompt.ActionText,0,{},true),snapshot=hitSnapshot(true)}) end
         end) end
         ctx.report.capabilities.outbound=observeOutbound(ctx,capture)
-        local reserves={};for name,value in pairs(traceReserves) do reserves[name]=value end
+        local reserves={};for name,value in pairs(hitTrace.reserves) do reserves[name]=value end
         ctx.report.limits={events=600,inboundPerRemotePerSecond=4,outboundPerRemotePerSecond=8,remotes=160,values=100,maxSeconds=1800,
             maxArguments=8,tableDepth=3,tableFields=12,valueNodes=64,stringBytes=96,
             reservedEvents=reserves,remoteSampleGroups=64,attributeSummaries=128,dashCooldownSampleSeconds=5,movementStateSampleSeconds=0.5}
@@ -1752,7 +1958,7 @@ listen(Run.Heartbeat,function(dt)
         end end
         if cfg.tpWalk and not cfg.fly then root.CFrame=root.CFrame+hum.MoveDirection*cfg.tpSpeed*math.min(dt,0.1) end
         if cfg.spin and not cfg.fly then root.CFrame=root.CFrame*CFrame.Angles(0,math.rad(cfg.spinSpeed)*dt,0) end
-        if cfg.autoAttack and attackElapsed>=cfg.attackDelay then attackElapsed=0;if nearest(cfg.attackRange) then triggerTool() end end
+        if cfg.autoAttack and attackElapsed>=cfg.attackDelay then attackElapsed=0;if nearest(cfg.attackRange) then triggerTool(true) end end
         if cfg.autoGears and gearElapsed>=cfg.gearDelay then gearElapsed=0;triggerTool() end
     end
     if promptElapsed>=cfg.promptDelay then promptElapsed=0;processPrompts() end
