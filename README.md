@@ -1,6 +1,16 @@
 # Huss Valley Panel
 
-Versão 0.4.2 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.4.3 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Auto Zone por TP na versão 0.4.3
+
+Ligar **Combat > Auto Zone** aplica um único TP imediatamente, sem esperar o ciclo de 0,25 s dos outros adaptadores. O recurso exige um runner vivo com `RunState` Active ou Safe. Não repete o TP enquanto o controle permanece ligado; desligar e ligar novamente cria uma nova tentativa. Respawn desliga o controle.
+
+A sessão `1792375962-232233` confirmou `RunState=Safe`, `SafeSide=B` e a posição do HumanoidRootPart `(105.64381408691406, 22.99999237060547, 126.02445220947266)`. O destino inicial usa esse ponto somente quando ele corresponde à geometria de uma área Safe carregada, com altura e limites locais compatíveis, sem indicação de lado A. Quando disponível, a referência ActiveMap/CurrentMap ou o mapa sob o personagem limita a busca. Mais de um mapa compatível sem uma referência atual é tratado como ambíguo. O registro não contém o caminho dessa peça; a detecção real ainda precisa ser conferida no Delta.
+
+Se o painel não identificar a zona, ele desliga o controle e explica o motivo. **Marcar zona aqui** permite registrar a posição atual quando o jogo já informa Safe e SafeSide A/B. Essa marca fica vinculada à instância carregada do mapa e dura somente nesta execução do painel; não é salva como coordenada universal em configurações. Depois de marcar, desligue e ligue Auto Zone para usar o ponto. Superfícies globais como Terrain não identificam um mapa para essa marcação.
+
+O movimento preserva a orientação e o deslocamento do pivot do personagem e zera suas velocidades residuais. Após 0,8 s, o status distingue posição corrigida pelo jogo, TP local ainda sem confirmação e estado Safe no lado esperado. O painel não altera RunState/SafeSide nem envia remotes para forjar a chegada. Desativar, fechar ou substituir o personagem cancela a verificação anterior. APIs: `Native.TeleportZone()`, `Native.CaptureZone()` e `Native.CancelZone()`; o adaptador AutoZone recebe uma chamada imediata por ativação e outra ao desligar.
 
 ## Auto Dash por proximidade na versão 0.4.1
 
@@ -51,7 +61,7 @@ O ESP e os filtros de time agora usam `GameRole` quando há Runner/Catcher publi
 
 A sessão da versão 0.3.1 agrupou IDs UUID variáveis como se fossem ações diferentes. Isso esgotou os 64 grupos e deixou 15 eventos amostrados fora do resumo, incluindo informações de RescueEvent e VowAbilityEvent que aparecem somente nos contadores. A versão 0.4.0 normaliza esses IDs na chave do grupo, preservando os argumentos originais. Também separa resultados por item/tipo/motivo e evita duplicar uma amostra idêntica nos campos first/latest da exportação compacta. Os limites de memória continuam em vigor.
 
-A amostra também mostrou emotes Play/Stop, Gear Use e votação como `"Vote", mapa, identificador`. Isso não confirma a origem/validade do terceiro argumento da votação nem todos os pré-requisitos de equipamentos. Auto Map Vote e Auto Revive por remote permanecem pendentes; os comportamentos anteriores por ferramenta/prompt continuam disponíveis. Auto Zone precisa vincular o ponto seguro ao mapa e lado corretos; a posição de um único marcador Safe não foi usada como destino universal.
+A amostra também mostrou emotes Play/Stop, Gear Use e votação como `"Vote", mapa, identificador`. Isso não confirma a origem/validade do terceiro argumento da votação nem todos os pré-requisitos de equipamentos. Auto Map Vote e Auto Revive por remote permanecem pendentes; os comportamentos anteriores por ferramenta/prompt continuam disponíveis. O Auto Zone foi integrado na versão 0.4.3 com o registro posterior e a validação de destino descritos acima.
 
 API nativa: `HussValleyPanel.Native.AttackNearest(alcance)`, `.Tackle()`, `.Dash()`, `.UseAbility()` e `.Status`. Os controles automáticos usam essas funções, que também verificam o estado da rodada em chamadas manuais. Os snapshots do diagnóstico incluem os contadores dos comandos nativos. Adaptadores externos registrados explicitamente continuam tendo prioridade.
 
@@ -166,13 +176,15 @@ Alterações no cliente podem ser corrigidas pelo servidor. Estes recursos não 
 
 ## Integrações ainda pendentes
 
-Auto Zone, Auto Down, Dash Cooldown, Runner AI, Catcher AI, Auto Spin Wheel, Auto Claim Journey, Auto Map Vote, Disable Anti-AFK do jogo, Hit Box, Leaderboard Visuals, Gems & Coins e Anti-Hit precisam de mapeamento específico do Huss Valley. Seus controles recusam ativação enquanto não houver um adaptador correspondente. Nenhum evento ou argumento foi inventado a partir do vídeo ou dos nomes recebidos no diagnóstico.
+Auto Down, Dash Cooldown, Runner AI, Catcher AI, Auto Spin Wheel, Auto Claim Journey, Auto Map Vote, Disable Anti-AFK do jogo, Hit Box, Leaderboard Visuals, Gems & Coins e Anti-Hit precisam de mapeamento específico do Huss Valley. Seus controles recusam ativação enquanto não houver um adaptador correspondente. Nenhum evento ou argumento foi inventado a partir do vídeo ou dos nomes recebidos no diagnóstico.
 
 Para a próxima etapa, execute o painel no jogo e use **Config > Suite > Copiar diagnóstico**. O texto contém caminhos/classes de eventos, prompts e alguns atributos de equipe/estado publicados pelo jogo. Ele fica na área de transferência ou em um campo de texto; não é enviado automaticamente. Esse levantamento identifica a estrutura, mas argumentos e comportamento dos eventos ainda precisam ser confirmados antes da integração.
 
 O ponto de integração é `getgenv().HussValleyPanel.RegisterAction(nome, callback)`. Os nomes esperados constam em `requiresAdapter` no código. O callback recebe `Enabled`, `Player` e `Config`; durante a execução recebe também `Character`, `Delta` e `IsActive()`. Adaptadores que cedem a execução devem conferir `IsActive()` antes de continuar. A desativação e o encerramento chamam o callback com `Enabled = false`.
 
 ## Validação e ciclo de vida
+
+A versão 0.4.3 passou na verificação de sintaxe do arquivo inteiro e em 26 casos simulados do Auto Zone: ativação imediata, ausência de repetição, confirmação por estado/lado, correção de posição, zona ausente, altura e orientação da área, conflito de lado, mapa atual e ambiguidade, marcação manual, substituição do mapa, rejeição de Terrain como identidade, cancelamento, falha de TP, preservação de adaptadores externos e das rotinas periódicas, papel, captura, espera, morte e universe incorreto. Esses casos executam o controlador, o setter e o despacho extraídos do próprio arquivo; não executam Roblox/Delta nem confirmam aceitação pelo servidor.
 
 A versão 0.4.2 reproduz uma sequência de uso do próprio escudo, resposta ao pedido, ataque com o jogador local como candidato, veredito `shielded`, consumo e captura posterior. Verifica que tráfego de outros jogadores não ocupa a amostragem local, dados sem identidade continuam incertos, IDs antigos expiram, nils/handlers são preservados, nenhum comando adicional é enviado pelo gravador e o modo continua até o encerramento ou seu limite de 15 minutos. Essa validação usa APIs simuladas; o uso real do escudo ainda precisa ser registrado no jogo.
 
@@ -194,3 +206,4 @@ As opções começam desligadas. O ESP possui frequência e distância configur�
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
 
 Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
+

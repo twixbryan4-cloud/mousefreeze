@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.4.2
+-- Huss Valley Panel 0.4.3
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -42,7 +42,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.4.2", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.4.3", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -551,7 +551,9 @@ local c=card(left,"Auto Revive","autoRevive","Aciona prompts proximos com Revive
 slider(c,"Intervalo","promptDelay",0.25,3,0.05,"s")
 c=card(left,"Speed Boost","speedBoost","Ajuste local de velocidade; o servidor pode corrigir esse valor.")
 slider(c,"WalkSpeed","walkSpeed",8,150,1)
-pending(left,"Auto Zone","autoZone")
+c=card(left,"Auto Zone","autoZone","Ao ligar, faz um unico TP para a zona segura registrada. A zona B do registro e reconhecida pela area Safe carregada; pontos de outros mapas nao sao reutilizados.")
+API.NativeStatusLabels.zone=text(c,"Destino: zona B registrada",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
+actionButton(c,"Marcar zona aqui",function() if API.Native then API.Native.CaptureZone() end end)
 c=card(left,"Player Lock On","lockOn","Mira no jogador vivo mais proximo dentro do raio. A captura do jogo precisa de integracao separada.")
 slider(c,"Radius","radius",5,150,1," studs");slider(c,"Prediction","prediction",0,0.5,0.01,"s")
 slider(c,"Smoothness","aimSmooth",1,25,1);checkbox(c,"Auto Face Target","faceTarget");checkbox(c,"Ignorar mesmo time","teamCheck")
@@ -953,8 +955,12 @@ local function stepAdapters(dt)
     end
 end
 for key,name in pairs(requiresAdapter) do actions[key]=function(v)
-    activeAdapters[key]=v and name or nil
-    if not v and type(adapters[name])=="function" then adapters[name]({Player=player,Config=cfg,Enabled=false}) end
+    -- Auto Zone is one immediate request per activation, never a repeating TP loop.
+    activeAdapters[key]=v and key~="autoZone" and name or nil
+    if type(adapters[name])=="function" and (not v or key=="autoZone") then
+        adapters[name]({Player=player,Config=cfg,Character=player.Character,Enabled=v,
+            IsActive=function() return state.alive and cfg[key] end})
+    end
 end end
 -- Native commands transcribed from the user's runtime trace, never enabled by default.
 do
@@ -1204,10 +1210,156 @@ do
         if finite(before) and finite(char:GetAttribute("DashCount")) and char:GetAttribute("DashCount")>before then confirm() else task.delay(0.8,confirm) end
         return true
     end
+    -- Auto Zone: the trace confirms this root position on side B, not a remote command.
+    do
+        local zone={generation=0,saved=nil,recorded=Vector3.new(105.64381408691406,22.99999237060547,126.02445220947266)}
+        function zone.mapRoot(object)
+            local top
+            while object and object~=workspace do
+                local name=string.lower(object.Name)
+                if name:match("^map%d+$") or (object.Parent and string.lower(object.Parent.Name)=="maps") then return object end
+                top=object;object=object.Parent
+            end
+            if top and (top:IsA("Model") or top:IsA("Folder")) and not top:FindFirstChild("Humanoid") then return top end
+        end
+        function zone.resolveMap(value)
+            if typeof(value)=="Instance" and value:IsDescendantOf(workspace) then return value end
+            if type(value)~="string" then return end
+            local object=workspace
+            for segment in value:gmatch("[^%./]+") do
+                if string.lower(segment)~="workspace" then object=object and object:FindFirstChild(segment) end
+            end
+            if object and object~=workspace then return object end
+        end
+        function zone.activeMap()
+            local gameFolder=Replicated:FindFirstChild("ChickenOrHero")
+            local owners={workspace}
+            if gameFolder then owners[#owners+1]=gameFolder;local f=gameFolder:FindFirstChild("Game");if f then owners[#owners+1]=f end end
+            for _,owner in ipairs(owners) do
+                for _,key in ipairs({"ActiveMap","CurrentMap"}) do
+                    local map=zone.resolveMap(owner:GetAttribute(key));if map then return map end
+                    local ref=owner:FindFirstChild(key)
+                    if ref and ref:IsA("ObjectValue") then map=zone.resolveMap(ref.Value);if map then return map end end
+                end
+            end
+        end
+        function zone.standingMap(char,root)
+            local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances={char,visuals}
+            local hit=workspace:Raycast(root.Position,Vector3.new(0,-40,0),params)
+            return hit and zone.mapRoot(hit.Instance)
+        end
+        function zone.safeAnchor(part)
+            local object=part
+            while object and object~=workspace do
+                local name=string.lower(object.Name):gsub("[^%w]","")
+                if name:match("^safe") then return object end
+                object=object.Parent
+            end
+        end
+        function zone.sideOf(object)
+            while object and object~=workspace do
+                local side=object:GetAttribute("SafeSide") or object:GetAttribute("Side")
+                if side=="A" or side=="B" then return side end
+                local name=string.lower(object.Name):gsub("[^%w]","")
+                if name=="a" or name=="safea" or name=="safezonea" then return "A" end
+                if name=="b" or name=="safeb" or name=="safezoneb" then return "B" end
+                object=object.Parent
+            end
+        end
+        function zone.contains(part,point)
+            local p=part.CFrame:PointToObjectSpace(point);local size=part.Size
+            return math.abs(p.X)<=size.X/2+0.25 and math.abs(p.Z)<=size.Z/2+0.25 and math.abs(p.Y)<=size.Y/2+6
+        end
+        function zone.destination(char,root)
+            local current=zone.activeMap() or zone.standingMap(char,root)
+            local saved=zone.saved
+            if saved and saved.map.Parent and current==saved.map then return saved end
+            local target
+            -- Only scan on activation. Coordinates alone do not identify a map.
+            for _,object in ipairs(workspace:GetDescendants()) do
+                if object:IsA("BasePart") and not object:IsDescendantOf(visuals) then
+                    local anchor=zone.safeAnchor(object)
+                    if anchor and zone.sideOf(object)~="A" and zone.contains(object,zone.recorded) then
+                        local map=zone.mapRoot(anchor)
+                        if map and (not current or map==current or object:IsDescendantOf(current)) then
+                            if target and target.map~=map then return nil,"Zona B ambigua: marque a zona deste mapa" end
+                            target={position=zone.recorded,side="B",map=map,anchor=anchor}
+                        end
+                    end
+                end
+            end
+            return target,"Zona B nao identificada neste mapa. Entre na zona e use Marcar zona aqui"
+        end
+        function N.CancelZone()
+            zone.generation=zone.generation+1;status("zone","Desativado")
+        end
+        function N.CaptureZone()
+            if not state.alive or game.GameId~=10764627709 then return false end
+            local char,hum,root=character();local side=player:GetAttribute("SafeSide")
+            if not root or not hum or hum.Health<=0 or player:GetAttribute("RunState")~="Safe" or (side~="A" and side~="B") then
+                notify("Entre na zona segura antes de marcar o destino.");return false
+            end
+            local map=zone.activeMap() or zone.standingMap(char,root)
+            if not map or map==char or map==visuals or not map.Parent then
+                notify("Nao foi possivel identificar o mapa sob a zona.");return false
+            end
+            zone.saved={position=root.Position,side=side,map=map}
+            status("zone","Zona "..side.." marcada neste mapa")
+            notify("Zona "..side.." marcada. Desligue e ligue Auto Zone para fazer o TP.")
+            return true
+        end
+        function N.TeleportZone()
+            if not state.alive or game.GameId~=10764627709 then return false,"Auto Zone disponivel apenas no Huss Valley" end
+            local char,hum,root=character();local run=player:GetAttribute("RunState")
+            if not char or not hum or not root or hum.Health<=0 or player:GetAttribute("GameRole")~="Runner" or (run~="Active" and run~="Safe") then
+                return false,"Auto Zone aguarda um runner vivo na rodada"
+            end
+            local target,reason=zone.destination(char,root)
+            if not target then status("zone",reason);return false,reason end
+            zone.generation=zone.generation+1;local generation=zone.generation
+            local ok=pcall(function()
+                -- Preserve the model's pivot offset and current orientation.
+                char:PivotTo(char:GetPivot()+(target.position-root.Position))
+                root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
+            end)
+            if not ok then return false,"Nao foi possivel aplicar o TP para a zona" end
+            local row=status("zone","TP para zona "..target.side.." aplicado; verificando")
+            row.sent=row.sent+1
+            task.delay(0.8,function()
+                if not state.alive or not cfg.autoZone or zone.generation~=generation or player.Character~=char then return end
+                if not root.Parent or not target.map.Parent then status("zone","Personagem ou mapa mudou apos o TP");return end
+                if (root.Position-target.position).Magnitude>12 then
+                    row.rejected=row.rejected+1;status("zone","O jogo corrigiu a posicao apos o TP")
+                elseif player:GetAttribute("RunState")=="Safe" and player:GetAttribute("SafeSide")==target.side then
+                    row.confirmed=(row.confirmed or 0)+1;status("zone","Zona "..target.side.." confirmada no estado do jogo")
+                else
+                    row.unconfirmed=(row.unconfirmed or 0)+1;status("zone","TP aplicado; entrada na zona ainda nao confirmada")
+                end
+            end)
+            return true
+        end
+        function N.AutoZone(ctx)
+            if not ctx.Enabled then N.CancelZone();return end
+            if ctx.IsActive and not ctx.IsActive() then return end
+            local ok,reason=N.TeleportZone()
+            if not ok then
+                local generation=zone.generation
+                task.defer(function()
+                    if state.alive and cfg.autoZone and zone.generation==generation then
+                        set("autoZone",false,true);status("zone",reason);notify(reason)
+                    end
+                end)
+            end
+        end
+    end
+    -- End Auto Zone.
     local function perform(ctx,kind,fn)
         if ctx.Enabled then if not ctx.IsActive or ctx.IsActive() then fn() end else cancel(kind) end
     end
     local function install()
+        if type(adapters.AutoZone)~="function" then adapters.AutoZone=N.AutoZone end
+        N.Mapped.zone=type(adapters.AutoZone)=="function"
         if remote("dash") and type(adapters.AutoDash)~="function" then adapters.AutoDash=function(ctx) perform(ctx,"dash",N.Dash) end end
         if remote("tackle") and type(adapters.AutoTackle)~="function" then adapters.AutoTackle=function(ctx) perform(ctx,"tackle",N.Tackle) end end
         if remote("ability") and type(adapters.AutoAbility)~="function" then adapters.AutoAbility=function(ctx) perform(ctx,"ability",N.UseAbility) end end
@@ -1227,7 +1379,10 @@ do
     actions.autoAttack=function(value) if not value then cancel("attack") end end
     if game.GameId==10764627709 then
         install()
-        listen(player.CharacterAdded,function() pending={};recent={};N.ReleaseDashInput();dashInput.scanAt=-math.huge end)
+        listen(player.CharacterAdded,function()
+            pending={};recent={};N.ReleaseDashInput();dashInput.scanAt=-math.huge
+            if cfg.autoZone then set("autoZone",false,true) else N.CancelZone() end
+        end)
         listen(Replicated.DescendantAdded,function(object)
             if object:IsA("RemoteEvent") and (object.Name=="MeleeEvent" or object.Name=="GameAction" or object.Name=="GearEvent" or object.Name=="BoostRequest" or object.Name=="HitReplayEvent") then install() end
         end)
@@ -1580,7 +1735,7 @@ local function hitSnapshot(gameStrings)
             if relevantAttribute(key) then sample.attributes[(owner==player and "Player." or "Character.")..key]=traceValue(value,0,{},gameStrings) end
         end end
     end
-    for _,key in ipairs({"movement","speedBoost","fly","noclip","tpWalk","autoAttack","autoDash","autoTackle","autoAbility","lockOn","antiHit"}) do sample.features[key]=cfg[key] end
+    for _,key in ipairs({"movement","speedBoost","fly","noclip","tpWalk","autoAttack","autoDash","autoZone","autoTackle","autoAbility","lockOn","antiHit"}) do sample.features[key]=cfg[key] end
     if API.Native then
         sample.native={}
         for name,row in pairs(API.Native.Status) do sample.native[name]={sent=row.sent,accepted=row.accepted,rejected=row.rejected,timeouts=row.timeouts,failed=row.failed,confirmed=row.confirmed,unconfirmed=row.unconfirmed,source=row.source,message=row.message} end
@@ -2236,3 +2391,4 @@ task.defer(function()
     end)
 end)
 return API
+
