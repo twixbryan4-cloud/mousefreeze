@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.3.0
+-- Huss Valley Panel 0.3.1
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -42,7 +42,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.3.0", Config=cfg, Adapters=adapters}
+local API = {Version="0.3.1", Config=cfg, Adapters=adapters}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -293,7 +293,7 @@ local close=button(window,"x",12,{Name="Close",Position=UDim2.new(1,-34,0,8),Siz
 local quickButton=button(window,"UI",10,{Name="QuickUIButton",Position=UDim2.new(1,-94,0,8),Size=UDim2.fromOffset(25,23),BackgroundTransparency=1})
 local dragbar=create("Frame",{Name="DragBar",Position=UDim2.fromOffset(60,0),Size=UDim2.new(1,-166,0,34),BackgroundTransparency=1,Active=true},window)
 local body=create("Frame",{Name="Body",Position=UDim2.fromOffset(68,38),Size=UDim2.new(1,-82,1,-68),BackgroundTransparency=1},window)
-local footer=text(window,"HUSS VALLEY  /  v0.3.0",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
+local footer=text(window,"HUSS VALLEY  /  v0.3.1",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
 themed(footer,"TextColor3","muted")
 local fpsLabel=text(window,"-- FPS",9,{Name="FPS",Position=UDim2.new(1,-90,1,-23),Size=UDim2.fromOffset(72,14),TextXAlignment=Enum.TextXAlignment.Right})
 local floating=button(gui,"HV",13,{Name="FloatingButton",Position=UDim2.new(0,12,0.36,0),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
@@ -650,6 +650,7 @@ do
     end
     actionButton(content,"Encerrar e copiar",function() API.StopHitDiagnostics(true) end)
     actionButton(content,"Copiar proxima parte",function() API.CopyNextDiagnosticsPart() end)
+    actionButton(content,"Copiar resumo de acoes",function() API.CopyActionDiagnostics() end)
     actionButton(content,"Copiar tudo",function() API.CopyHitDiagnostics() end)
     actionButton(content,"Salvar JSON",function() API.SaveDiagnostics() end)
     API.TraceToolbar=create("Frame",{Name="TraceToolbar",AnchorPoint=Vector2.new(0.5,0),Position=UDim2.new(0.5,0,0,6),
@@ -670,7 +671,7 @@ actionButton(configs,"Save Config",function() API.SaveConfig(configName.Text) en
 actionButton(configs,"Load Config",function() API.LoadConfig(configName.Text) end)
 actionButton(configs,"Delete Config",function() API.DeleteConfig(configName.Text) end)
 checkbox(configs,"Auto-Load This Config On Launch","autoLoad");configExpand()
-local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.3.0")
+local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.3.1")
 actionButton(suite,"Rejoin Server",function() API.Rejoin() end)
 actionButton(suite,"Destroy Menu",function() API.Destroy() end)
 actionButton(suite,"Copiar diagnostico",function() API.ExportDiagnostics() end);suiteExpand()
@@ -1193,7 +1194,7 @@ function API.ExportDiagnostics()
     for prompt in pairs(prompts) do if prompt.Parent and #report.prompts<100 then report.prompts[#report.prompts+1]={path=prompt:GetFullName(),action=prompt.ActionText,object=prompt.ObjectText} end end
     for _,p in ipairs(Players:GetPlayers()) do
         local row={team=p.Team and p.Team.Name or "none",attributes={}}
-        for _,key in ipairs({"Role","Team","State","Downed","Caught","IsCatcher","IsRunner","InRound"}) do
+        for _,key in ipairs({"GameRole","RunState","Role","Team","State","Downed","Caught","IsCatcher","IsRunner","InRound","AFK","KnockdownStreak"}) do
             local v=p:GetAttribute(key);if type(v)=="string" or type(v)=="boolean" or type(v)=="number" then row.attributes[key]=v end
             local ch=p.Character;local cv=ch and ch:GetAttribute(key);if type(cv)=="string" or type(cv)=="boolean" or type(cv)=="number" then row.attributes["Character."..key]=cv end
         end
@@ -1270,23 +1271,87 @@ local function hitSnapshot(gameStrings)
     for _,key in ipairs({"movement","speedBoost","fly","noclip","tpWalk","autoAttack","lockOn","antiHit"}) do sample.features[key]=cfg[key] end
     return sample
 end
+local traceReserves={outbound=180,inbound=140,critical=100,state=80,telemetry=100}
+local function traceGroup(kind,data)
+    if kind=="remote" then return data.direction=="out" and "outbound" or "inbound" end
+    if kind=="humanoidState" then
+        for _,word in ipairs({"Dead","FallingDown","Ragdoll","GettingUp"}) do
+            if string.find(data.current,word,1,true) then return "critical" end
+        end
+        return "telemetry"
+    end
+    if kind=="attribute" then
+        local key=string.lower(data.name)
+        if key=="dashcooldownuntil" or key=="movementstate" then return "telemetry" end
+        for _,word in ipairs({"role","runstate","health","dead","caught","downed","knocked","tackleactive","dashready","zone"}) do
+            if string.find(key,word,1,true) then return "critical" end
+        end
+        return "state"
+    end
+    if kind=="stat" then return "state" end
+    return "critical"
+end
 local function recordHitEvent(ctx,kind,data)
     if not ctx.active then return end
     ctx.report.eventsSeen=ctx.report.eventsSeen+1
     local limit=ctx.general and 600 or (ctx.waiting and 20 or 160)
+    local group=ctx.general and traceGroup(kind,data) or nil
     if #ctx.report.events>=limit then
         local remove=1
-        for i,event in ipairs(ctx.report.events) do if event.kind=="remote" or (ctx.general and event.kind=="humanoidState") then remove=i;break end end
+        if ctx.general then
+            -- Each class borrows unused space, but cannot evict another class below its reserve.
+            local victim=group
+            if (ctx.report.retainedByGroup[group] or 0)<traceReserves[group] then
+                local largest=0
+                for candidate,reserve in pairs(traceReserves) do
+                    local excess=(ctx.report.retainedByGroup[candidate] or 0)-reserve
+                    if excess>largest then largest=excess;victim=candidate end
+                end
+            end
+            for i,event in ipairs(ctx.report.events) do if event.group==victim then remove=i;break end end
+            local previous=ctx.report.events[remove].group
+            ctx.report.retainedByGroup[previous]=ctx.report.retainedByGroup[previous]-1
+            ctx.report.eventsDroppedByGroup[previous]=(ctx.report.eventsDroppedByGroup[previous] or 0)+1
+        else
+            for i,event in ipairs(ctx.report.events) do if event.kind=="remote" then remove=i;break end end
+        end
         table.remove(ctx.report.events,remove);ctx.report.eventsDropped=ctx.report.eventsDropped+1
     end
-    ctx.report.events[#ctx.report.events+1]={t=math.floor((os.clock()-ctx.started)*1000+0.5)/1000,seq=ctx.report.eventsSeen,kind=kind,data=data}
+    local event={t=math.floor((os.clock()-ctx.started)*1000+0.5)/1000,seq=ctx.report.eventsSeen,kind=kind,data=data,group=group}
+    ctx.report.events[#ctx.report.events+1]=event
+    if group then ctx.report.retainedByGroup[group]=(ctx.report.retainedByGroup[group] or 0)+1 end
+    return event
+end
+local function recordAttribute(ctx,owner,key,previous,value)
+    if not ctx.general then
+        return recordHitEvent(ctx,"attribute",{owner=owner,name=key,previous=traceValue(previous,0,{}),value=traceValue(value,0,{})})
+    end
+    local now=os.clock()-ctx.started
+    local id=owner.."@"..key
+    local summary=ctx.report.attributeStats[id]
+    ctx.report.attributeChangesSeen=ctx.report.attributeChangesSeen+1
+    if not summary and ctx.attributeSummaryCount<128 then
+        summary={owner=owner,name=key,changes=0,recorded=0,coalesced=0,firstT=now,previous=traceValue(previous,0,{},true)}
+        ctx.report.attributeStats[id]=summary;ctx.attributeSummaryCount=ctx.attributeSummaryCount+1
+    end
+    local serialized=traceValue(value,0,{},true)
+    if summary then summary.changes=summary.changes+1;summary.last=serialized;summary.lastT=now end
+    local lower=string.lower(key)
+    local interval=lower=="dashcooldownuntil" and 5 or (lower=="movementstate" and 0.5 or 0)
+    if summary and interval>0 and summary.lastRecordedT and now-summary.lastRecordedT<interval then
+        summary.coalesced=summary.coalesced+1;ctx.report.eventsCoalesced=ctx.report.eventsCoalesced+1
+        return
+    end
+    if summary then summary.recorded=summary.recorded+1;summary.lastRecordedT=now end
+    return recordHitEvent(ctx,"attribute",{owner=owner,name=key,previous=traceValue(previous,0,{},true),value=serialized})
 end
 local function traceStatus(message)
     if state.alive then hitStatus.Text=message;API.DiagnosticStatus.Text=message end
 end
-local function makeTraceParts(report)
+local function makeTraceParts(report,actionsOnly)
     local encoded=Http:JSONEncode(report)
-    hitTrace.encoded=encoded;hitTrace.parts={};hitTrace.nextPart=1
+    if not actionsOnly then hitTrace.encoded=encoded end
+    hitTrace.partMode=actionsOnly and "acoes" or "completo";hitTrace.parts={};hitTrace.nextPart=1
     -- Split only between UTF-8 characters. Parts are labelled fragments of one JSON.
     local start=1
     repeat
@@ -1297,14 +1362,29 @@ local function makeTraceParts(report)
 end
 function API.CopyNextDiagnosticsPart(index)
     if not hitTrace.last then notify("Grave e encerre uma analise primeiro.");return false end
-    if not hitTrace.encoded then makeTraceParts(hitTrace.last) end
+    if #hitTrace.parts==0 then makeTraceParts(hitTrace.last) end
     index=index or hitTrace.nextPart
     if type(index)~="number" or index%1~=0 or index<1 or index>#hitTrace.parts then return false end
     local total=#hitTrace.parts
     hitTrace.nextPart=index%total+1
-    local header="[HUSS TRACE "..hitTrace.last.session.." | parte "..index.."/"..total.."]\n"
+    local header="[HUSS TRACE "..hitTrace.last.session.." | "..hitTrace.partMode.." | parte "..index.."/"..total.."]\n"
     traceStatus("Copiada parte "..index.."/"..total.." | proxima: "..hitTrace.nextPart)
     return presentDiagnostic(header..hitTrace.parts[index],"Parte "..index.."/"..total.." copiada. Envie aqui; depois copie a proxima.")
+end
+function API.CopyActionDiagnostics()
+    local report=hitTrace.last
+    if not report then notify("Grave e encerre uma analise primeiro.");return false end
+    local markers={}
+    for _,event in ipairs(report.events) do if event.kind=="marker" then markers[#markers+1]=event end end
+    while #markers>24 do table.remove(markers,1) end
+    local summary={kind="HussValleyActionSummary",version=report.version,session=report.session,placeId=report.placeId,gameId=report.gameId,
+        duration=report.duration,reason=report.reason,capabilities=report.capabilities,collectorErrors=report.collectorErrors,
+        initial=report.initial,final=report.final,remoteStats=report.remoteStats,remoteSamples=report.remoteSamples,markers=markers,
+        eventsSeen=report.eventsSeen,eventsDropped=report.eventsDropped,eventsCoalesced=report.eventsCoalesced,healthDecreases=report.healthDecreases,
+        remoteSampleEventsOmitted=report.remoteSampleEventsOmitted,
+        note="Resumo de amostras inicial/recente por endpoint, direcao e acao. Nao substitui o historico completo, disponivel em Salvar JSON."}
+    makeTraceParts(summary,true)
+    return API.CopyNextDiagnosticsPart(1)
 end
 endHitTrace=function(reason,copy)
     local ctx=hitTrace.current
@@ -1320,7 +1400,7 @@ endHitTrace=function(reason,copy)
     traceStatus("Encerrado | "..#ctx.report.events.." registros | vida caiu: "..ctx.report.healthDecreases)
     if API.TraceToolbar then API.TraceToolbar.Visible=false end
     if copy and state.alive then
-        if ctx.general then makeTraceParts(ctx.report);API.CopyNextDiagnosticsPart(1)
+        if ctx.general then API.CopyActionDiagnostics()
         else presentDiagnostic(Http:JSONEncode(ctx.report),"Analise de hits copiada. Envie o texto aqui.") end
     end
     return ctx.report
@@ -1343,7 +1423,7 @@ local function isHitAttribute(key,value,previous)
         if lower:find("state",1,true) or lower:find("status",1,true) then
             for _,word in ipairs({"caught","captured","dead","downed","knocked","stunned"}) do if text==word then return true end end
         end
-        if (lower=="role" or lower=="team") and type(previous)=="string" and string.lower(previous)=="runner" and (text=="catcher" or text=="chaser") then return true end
+        if (lower=="role" or lower=="gamerole" or lower=="team") and type(previous)=="string" and string.lower(previous)=="runner" and (text=="catcher" or text=="chaser") then return true end
     end
     return false
 end
@@ -1422,13 +1502,14 @@ function API.StartHitDiagnostics(waitForHit)
     if not state.alive then return false end
     if hitTrace.current then notify("Ja existe uma gravacao. Use Encerrar e copiar antes de iniciar outra.");return false end
     local ctx={active=true,started=os.clock(),general=waitForHit=="general",waiting=waitForHit~=false and waitForHit~="general",
-        connections={},characterConnections={},subscribed={},remotePaths={},remoteCount=0}
+        connections={},characterConnections={},subscribed={},remotePaths={},remoteCount=0,attributeSummaryCount=0,remoteSampleGroups={}}
     ctx.report={kind=ctx.general and "HussValleyGeneralTrace" or "HussValleyHitTrace",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
         session=tostring(os.time()).."-"..tostring(math.random(100000,999999)),
         mode=ctx.general and "round30m" or (ctx.waiting and "waitForLocalSignal" or "record20s"),
         initial=hitSnapshot(ctx.general),events={},eventsSeen=0,eventsDropped=0,healthDecreases=0,observedRemotes={},missingRemotesAtStart={},
         capabilities={getconnections=type(getconnections)=="function",decompile=type(decompile)=="function",getscriptbytecode=type(getscriptbytecode)=="function"},
-        remoteStats={},initialStats={},observedValues={},collectorErrors=0,
+        remoteStats={},remoteSamples={},remoteSampleEventsOmitted=0,initialStats={},observedValues={},collectorErrors=0,
+        attributeStats={},attributeChangesSeen=0,eventsCoalesced=0,retainedByGroup={},eventsDroppedByGroup={},
         note="Observacao do cliente; eventos recebidos podem se referir a outros jogadores. Marcadores sao relatos do usuario; zoneContact e apenas uma pista. O registro nao contem logica do servidor."}
     hitTrace.current=ctx
     local function attach(signal,fn,bucket)
@@ -1451,6 +1532,9 @@ function API.StartHitDiagnostics(waitForHit)
         end
         local last=hum.Health
         local attributes=char:GetAttributes()
+        if ctx.general then
+            for _,summary in pairs(ctx.report.attributeStats) do if summary.owner=="Character" then summary.lastRecordedT=nil end end
+        end
         attach(hum.HealthChanged,function(value)
             if value<last then ctx.report.healthDecreases=ctx.report.healthDecreases+1;triggerHitTrace(ctx,"healthDecreased") end
             recordHitEvent(ctx,"health",{previous=last,current=value});last=value
@@ -1463,7 +1547,7 @@ function API.StartHitDiagnostics(waitForHit)
             if relevantAttribute(key) then
                 local value,previous=char:GetAttribute(key),attributes[key];attributes[key]=value
                 if isHitAttribute(key,value,previous) then triggerHitTrace(ctx,"characterAttribute:"..key) end
-                recordHitEvent(ctx,"attribute",{owner="Character",name=key,previous=traceValue(previous,0,{},ctx.general),value=traceValue(value,0,{},ctx.general)})
+                recordAttribute(ctx,"Character",key,previous,value)
             end
         end,ctx.characterConnections)
         if ctx.general then
@@ -1493,7 +1577,7 @@ function API.StartHitDiagnostics(waitForHit)
         if relevantAttribute(key) then
             local value,previous=player:GetAttribute(key),playerAttributes[key];playerAttributes[key]=value
             if isHitAttribute(key,value,previous) then triggerHitTrace(ctx,"playerAttribute:"..key) end
-            recordHitEvent(ctx,"attribute",{owner="Player",name=key,previous=traceValue(previous,0,{},ctx.general),value=traceValue(value,0,{},ctx.general)})
+            recordAttribute(ctx,"Player",key,previous,value)
         end
     end)
     attach(player.CharacterAdded,function(char) recordHitEvent(ctx,"respawn",{});watchCharacter(char) end)
@@ -1523,7 +1607,21 @@ function API.StartHitDiagnostics(waitForHit)
         local args=table.pack(...);local data={remote=path,direction=direction,method=method,argumentCount=args.n,arguments={}}
         local seen={};for i=1,math.min(args.n,8) do data.arguments[i]=traceValue(args[i],0,seen,ctx.general) end
         if args.n>8 then data.argumentsTruncated=true end
-        stats.sampled=stats.sampled+1;recordHitEvent(ctx,"remote",data)
+        stats.sampled=stats.sampled+1
+        local event=recordHitEvent(ctx,"remote",data)
+        if ctx.general then
+            -- Keep first/latest samples per action independently of chronological event eviction.
+            local first=select(1,...)
+            if type(first)=="table" then first=rawget(first,"action") or rawget(first,"Action") or rawget(first,"command") or rawget(first,"type") or rawget(first,"op") end
+            local tag=type(first)=="string" and #first<=96 and string.gsub(first,"[%c]","") or ""
+            local sampleKey=key.."\0"..tag
+            local samples=ctx.remoteSampleGroups[sampleKey]
+            if not samples and #ctx.report.remoteSamples<64 then
+                samples={remote=path,direction=direction,action=tag,first=event};ctx.remoteSampleGroups[sampleKey]=samples
+                ctx.report.remoteSamples[#ctx.report.remoteSamples+1]=samples
+            end
+            if samples then samples.latest=event else ctx.report.remoteSampleEventsOmitted=ctx.report.remoteSampleEventsOmitted+1 end
+        end
     end
     local function subscribe(remote)
         if ctx.subscribed[remote] or ctx.remoteCount>=160 or not (remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent") or (ctx.general and remote:IsA("RemoteFunction"))) then return end
@@ -1577,7 +1675,7 @@ function API.StartHitDiagnostics(waitForHit)
             attach(object.AttributeChanged,function(name)
                 if relevantAttribute(name) then
                     local value,previous=object:GetAttribute(name),attributes[name];attributes[name]=value
-                    recordHitEvent(ctx,"attribute",{owner=path,name=name,previous=traceValue(previous,0,{},true),value=traceValue(value,0,{},true)})
+                    recordAttribute(ctx,path,name,previous,value)
                 end
             end)
         end
@@ -1589,8 +1687,10 @@ function API.StartHitDiagnostics(waitForHit)
             if who==player then recordHitEvent(ctx,"prompt",{prompt=traceValue(prompt,0,{}),action=traceValue(prompt.ActionText,0,{},true),snapshot=hitSnapshot(true)}) end
         end) end
         ctx.report.capabilities.outbound=observeOutbound(ctx,capture)
+        local reserves={};for name,value in pairs(traceReserves) do reserves[name]=value end
         ctx.report.limits={events=600,inboundPerRemotePerSecond=4,outboundPerRemotePerSecond=8,remotes=160,values=100,maxSeconds=1800,
-            maxArguments=8,tableDepth=3,tableFields=12,valueNodes=64,stringBytes=96}
+            maxArguments=8,tableDepth=3,tableFields=12,valueNodes=64,stringBytes=96,
+            reservedEvents=reserves,remoteSampleGroups=64,attributeSummaries=128,dashCooldownSampleSeconds=5,movementStateSampleSeconds=0.5}
         ctx.report.excluded="Chat, private/admin, audio/bots and high-frequency replication; RemoteFunction callbacks and direct-dot remote calls are not intercepted."
         traceStatus("Gravando rodada | ate 30 min | saida: "..ctx.report.capabilities.outbound)
         API.TraceToolbar.Visible=true
@@ -1619,7 +1719,7 @@ end
 function API.SaveDiagnostics()
     if not hitTrace.last then notify("Encerre a gravacao primeiro.");return false end
     if type(writefile)~="function" then notify("Este executor nao permite salvar arquivos. Use as partes copiadas.");return false end
-    if not hitTrace.encoded then makeTraceParts(hitTrace.last) end
+    if not hitTrace.encoded then hitTrace.encoded=Http:JSONEncode(hitTrace.last) end
     local filename="huss-valley-trace-"..hitTrace.last.session..".json"
     local ok=pcall(writefile,filename,hitTrace.encoded)
     if not ok then notify("Nao foi possivel salvar. Use as partes copiadas.");return false end
