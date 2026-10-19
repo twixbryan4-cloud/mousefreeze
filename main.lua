@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.4.1
+-- Huss Valley Panel 0.4.2
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -42,7 +42,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.4.1", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.4.2", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -295,7 +295,7 @@ local close=button(window,"x",12,{Name="Close",Position=UDim2.new(1,-34,0,8),Siz
 local quickButton=button(window,"UI",10,{Name="QuickUIButton",Position=UDim2.new(1,-94,0,8),Size=UDim2.fromOffset(25,23),BackgroundTransparency=1})
 local dragbar=create("Frame",{Name="DragBar",Position=UDim2.fromOffset(60,0),Size=UDim2.new(1,-166,0,34),BackgroundTransparency=1,Active=true},window)
 local body=create("Frame",{Name="Body",Position=UDim2.fromOffset(68,38),Size=UDim2.new(1,-82,1,-68),BackgroundTransparency=1},window)
-local footer=text(window,"HUSS VALLEY  /  v0.4.1",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
+local footer=text(window,"HUSS VALLEY  /  v"..API.Version,9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
 themed(footer,"TextColor3","muted")
 local fpsLabel=text(window,"-- FPS",9,{Name="FPS",Position=UDim2.new(1,-90,1,-23),Size=UDim2.fromOffset(72,14),TextXAlignment=Enum.TextXAlignment.Right})
 local floating=button(gui,"HV",13,{Name="FloatingButton",Position=UDim2.new(0,12,0.36,0),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
@@ -573,8 +573,10 @@ slider(c,"Alcance","tackleRange",2,12,0.5," studs");API.NativeStatusLabels.tackl
 pending(right,"Dash Cooldown","dashCooldown")
 c=card(right,"Auto Ability","autoAbility","Usa a habilidade equipada quando um oponente esta perto. Aguarda a disponibilidade do jogo.")
 slider(c,"Distancia do oponente","abilityRange",2,40,1," studs");API.NativeStatusLabels.ability=text(c,"Status: aguardando partida",9)
-c=card(right,"Anti-Hit (pendente)","antiHit","Indisponivel: o diagnostico identifica os eventos, mas nao revela a validacao dos hits. Invulnerabilidade ainda nao foi implementada.")
+c=card(right,"Anti-Hit (pendente)","antiHit","Protecao ainda nao validada. Use Gravar meu escudo antes de equipar e ativar o OneHitShield pelo jogo; marque a ativacao e copie o registro depois.")
 local hitStatus=text(c,"Status: aguardando analise",10)
+actionButton(c,"Gravar meu escudo",function() API.StartShieldDiagnostics() end)
+actionButton(c,"Marcar escudo ativado",function() API.MarkDiagnostics("Escudo ativado") end)
 actionButton(c,"Aguardar meu hit",function() API.StartHitDiagnostics() end)
 actionButton(c,"Gravar 20s agora",function() API.StartHitDiagnostics(false) end)
 actionButton(c,"Encerrar e copiar",function() API.StopHitDiagnostics(true) end)
@@ -671,7 +673,7 @@ do
     text(API.TraceToolbar,"GRAVANDO / marque logo apos a acao",9,{Position=UDim2.fromOffset(8,2),Size=UDim2.new(1,-16,0,17),ZIndex=36})
     for i,item in ipairs({{"Hit","Recebi hit"},{"Cai","Cai"},{"Matei","Matei"},{"Zona","Zona"},{"Revivi","Revivi"},{"Habil.","Habilidade"},{"Parar"}}) do
         local marker=button(API.TraceToolbar,item[1],9,{Name="TraceMarker"..i,Position=UDim2.new((i-1)/7,2,0,23),Size=UDim2.new(1/7,-4,0,27),ZIndex=36})
-        listen(marker.Activated,function() if item[2] then API.MarkDiagnostics(item[2]) else API.StopHitDiagnostics(true) end end)
+        listen(marker.Activated,function() if i==6 then API.MarkAbilityDiagnostics() elseif item[2] then API.MarkDiagnostics(item[2]) else API.StopHitDiagnostics(true) end end)
     end
 end
 local configs,configExpand=card(right,"Configs",nil,"Salva no executor quando ha acesso a arquivos; caso contrario, guarda apenas nesta sessao.")
@@ -682,7 +684,7 @@ actionButton(configs,"Save Config",function() API.SaveConfig(configName.Text) en
 actionButton(configs,"Load Config",function() API.LoadConfig(configName.Text) end)
 actionButton(configs,"Delete Config",function() API.DeleteConfig(configName.Text) end)
 checkbox(configs,"Auto-Load This Config On Launch","autoLoad");configExpand()
-local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.4.1")
+local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / "..API.Version)
 actionButton(suite,"Rejoin Server",function() API.Rejoin() end)
 actionButton(suite,"Destroy Menu",function() API.Destroy() end)
 actionButton(suite,"Copiar diagnostico",function() API.ExportDiagnostics() end);suiteExpand()
@@ -1532,7 +1534,7 @@ local function traceValue(value,depth,seen,gameStrings)
         if gameStrings then return string.gsub(value,"[%c]","") end
         local lower=string.lower(value)
         if lower=="runner" or lower=="catcher" or lower=="chaser" or lower=="lobby" or lower=="playing" or lower=="alive" or lower=="spectating" or lower=="normal" then return value end
-        for _,word in ipairs({"damage","hit","attack","melee","tackle","caught","capture","dead","death","kill","down","reviv","invul","immune","stun","knock","ragdoll","dodge","parry","block"}) do
+        for _,word in ipairs({"damage","hit","attack","melee","tackle","caught","capture","dead","death","kill","down","reviv","invul","immune","stun","knock","ragdoll","dodge","parry","block","shield","protect"}) do
             if #value<=64 and string.find(lower,word,1,true) then return string.gsub(value,"[%c]","") end
         end
         return {type="string",length=#value}
@@ -1560,7 +1562,7 @@ end
 local function relevantAttribute(name)
     local lower=string.lower(name)
     if lower:find("token",1,true) or lower:find("secret",1,true) or lower:find("password",1,true) or lower:find("auth",1,true) then return false end
-    for _,part in ipairs({"health","damage","dead","alive","death","caught","captur","down","state","status","role","team","round","invul","immune","iframe","stun","knock","ragdoll","zone","safe","kill","dash","cooldown","ability","tackle","gem","coin","journey","vote","afk","map","reviv"}) do
+    for _,part in ipairs({"health","damage","dead","alive","death","caught","captur","down","state","status","role","team","round","invul","immune","iframe","stun","knock","ragdoll","zone","safe","kill","dash","cooldown","ability","tackle","gem","coin","journey","vote","afk","map","reviv","shield","block","protect","gear"}) do
         if lower:find(part,1,true) then return true end
     end
     return false
@@ -1586,6 +1588,63 @@ local function hitSnapshot(gameStrings)
     return sample
 end
 hitTrace.reserves={outbound=180,inbound=140,critical=100,state=80,telemetry=100}
+function hitTrace.shieldAttribute(key)
+    local lower=string.lower(key)
+    for _,word in ipairs({"shield","block","protect","invul","immune","iframe","gear","health","dead","caught","downed","runstate","gamerole"}) do
+        if lower:find(word,1,true) then return true end
+    end
+    return false
+end
+function hitTrace.rememberShieldID(ctx,id,subject)
+    if type(id)~="string" or #id>96 then return end
+    if not ctx.shieldIDs[id] then
+        if #ctx.shieldIDOrder>=64 then ctx.shieldIDs[table.remove(ctx.shieldIDOrder,1)]=nil end
+        ctx.shieldIDOrder[#ctx.shieldIDOrder+1]=id
+    end
+    ctx.shieldIDs[id]={subject=subject,time=os.clock()}
+end
+function hitTrace.shieldSubject(ctx,remote,direction,args)
+    local data=type(args[2])=="table" and args[2] or (type(args[1])=="table" and args[1] or nil)
+    local id=data and (rawget(data,"requestId") or rawget(data,"id")) or nil
+    if direction=="out" then
+        if remote.Name=="GearEvent" and type(args[4])=="string" then id=args[4] end
+        hitTrace.rememberShieldID(ctx,id,"localRequest")
+        return "localRequest"
+    end
+    local subject
+    if data then
+        local targetId,target=rawget(data,"targetId"),rawget(data,"target")
+        if targetId==player.UserId or (target~=nil and target==player.Character) then subject="localTarget"
+        elseif type(targetId)=="number" or typeof(target)=="Instance" then return "otherPlayer" end
+        for _,field in ipairs({"targetIds","targets"}) do
+            local list=rawget(data,field)
+            if type(list)=="table" then
+                local checked=0
+                for _,value in next,list do
+                    checked=checked+1;if checked>64 then break end
+                    if value==player.UserId or (value~=nil and value==player.Character) then subject="localTarget";break end
+                end
+            end
+        end
+        if not subject then
+            local actorId=rawget(data,"actorId") or rawget(data,"ownerId")
+            local actor=rawget(data,"character")
+            if actorId==player.UserId or (actor~=nil and actor==player.Character) then subject="localActor"
+            elseif actorId~=nil or actor~=nil or type(rawget(data,"targetIds"))=="table" or type(rawget(data,"targets"))=="table" then return "otherPlayer" end
+        end
+        local known=ctx.shieldIDs[id or false]
+        if not subject and known and os.clock()-known.time<=20 then subject=known.subject end
+        if subject then
+            hitTrace.rememberShieldID(ctx,id,subject)
+            hitTrace.rememberShieldID(ctx,rawget(data,"canonicalId"),subject)
+        end
+    end
+    if not subject and type(args[1])=="string" then
+        local known=ctx.shieldIDs[args[1]] or ctx.shieldIDs[type(args[2])=="string" and args[2] or false]
+        if known and os.clock()-known.time<=20 then subject=known.subject end
+    end
+    return subject or "unattributed"
+end
 function hitTrace.group(kind,data)
     if kind=="remote" then return data.direction=="out" and "outbound" or "inbound" end
     if kind=="humanoidState" then
@@ -1634,6 +1693,12 @@ local function recordHitEvent(ctx,kind,data)
     local event={t=math.floor((os.clock()-ctx.started)*1000+0.5)/1000,seq=ctx.report.eventsSeen,kind=kind,data=data,group=group}
     ctx.report.events[#ctx.report.events+1]=event
     if group then ctx.report.retainedByGroup[group]=(ctx.report.retainedByGroup[group] or 0)+1 end
+    if ctx.shield and (kind=="remote" or kind=="marker" or kind=="health" or kind=="died" or kind=="respawn"
+        or kind=="attribute" and hitTrace.shieldAttribute(data.name)) then
+        local focused=ctx.report.shield
+        if #focused.events>=80 then table.remove(focused.events,1);focused.eventsDropped=focused.eventsDropped+1 end
+        focused.events[#focused.events+1]=event
+    end
     return event
 end
 local function recordAttribute(ctx,owner,key,previous,value)
@@ -1702,6 +1767,11 @@ function API.CopyActionDiagnostics()
         eventsSeen=report.eventsSeen,eventsDropped=report.eventsDropped,eventsCoalesced=report.eventsCoalesced,healthDecreases=report.healthDecreases,
         remoteSampleEventsOmitted=report.remoteSampleEventsOmitted,
         note="Resumo de amostras inicial/recente por endpoint, direcao e acao. Nao substitui o historico completo, disponivel em Salvar JSON."}
+    if report.shield then
+        summary.kind="HussValleyShieldSummary";summary.shield=report.shield
+        summary.remoteSamples=nil;summary.markers=nil
+        summary.note="Captura focada no escudo. localTarget indica alvo/candidato, nao confirma acerto. unattributed nao tem dono confirmado. Fonte do inventario: State recebido neste cliente. Nao demonstra imunidade permanente."
+    end
     makeTraceParts(summary,true)
     return API.CopyNextDiagnosticsPart(1)
 end
@@ -1816,11 +1886,15 @@ function API.MarkDiagnostics(label)
     traceStatus("Gravando | marcado: "..label)
     return true
 end
+function API.MarkAbilityDiagnostics()
+    return API.MarkDiagnostics(hitTrace.current and hitTrace.current.shield and "Escudo ativado" or "Habilidade")
+end
 function API.StartGeneralDiagnostics() return API.StartHitDiagnostics("general") end
+function API.StartShieldDiagnostics() return API.StartHitDiagnostics("shield") end
 function API.StartHitDiagnostics(waitForHit)
     if not state.alive then return false end
     if hitTrace.current then notify("Ja existe uma gravacao. Use Encerrar e copiar antes de iniciar outra.");return false end
-    local ctx={active=true,started=os.clock(),general=waitForHit=="general",waiting=waitForHit~=false and waitForHit~="general",
+    local ctx={active=true,started=os.clock(),general=waitForHit=="general" or waitForHit=="shield",shield=waitForHit=="shield",waiting=waitForHit~=false and waitForHit~="general" and waitForHit~="shield",
         connections={},characterConnections={},subscribed={},remotePaths={},remoteCount=0,attributeSummaryCount=0,remoteSampleGroups={}}
     ctx.report={kind=ctx.general and "HussValleyGeneralTrace" or "HussValleyHitTrace",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
         session=tostring(os.time()).."-"..tostring(math.random(100000,999999)),
@@ -1830,6 +1904,11 @@ function API.StartHitDiagnostics(waitForHit)
         remoteStats={},remoteSamples={},remoteSampleEventsOmitted=0,initialStats={},observedValues={},collectorErrors=0,
         attributeStats={},attributeChangesSeen=0,eventsCoalesced=0,retainedByGroup={},eventsDroppedByGroup={},
         note="Observacao do cliente; eventos recebidos podem se referir a outros jogadores. Marcadores sao relatos do usuario; zoneContact e apenas uma pista. O registro nao contem logica do servidor."}
+    if ctx.shield then
+        ctx.shieldIDs={};ctx.shieldIDOrder={}
+        ctx.report.kind="HussValleyShieldTrace";ctx.report.mode="shield15m"
+        ctx.report.shield={localPlayerId=player.UserId,events={},eventsDropped=0,inventorySamples={},inventorySamplesDropped=0,excludedOtherPlayerEvents=0}
+    end
     hitTrace.current=ctx
     local function attach(signal,fn,bucket)
         bucket=bucket or ctx.connections
@@ -1905,9 +1984,21 @@ function API.StartHitDiagnostics(waitForHit)
     local paths={"chrono.Shared.Remotes.Death","ChickenOrHero.Game.GameAction","ChickenOrHero.Game.MeleeEvent",
         "ChickenOrHero.Game.HitReplayEvent","ChickenOrHero.Game.RescueEvent","ChickenOrHero.Game.TeamEventRemote",
         "ChickenOrHero.Presentation.MovementGuardEvent"}
+    if ctx.shield then paths={"chrono.Shared.Remotes.Death","ChickenOrHero.Game.GameAction","ChickenOrHero.Game.MeleeEvent",
+        "ChickenOrHero.Game.HitReplayEvent","ChickenOrHero.Gear.GearEvent","ChickenOrHero.Weapons.ArmoryEvent"} end
     local wanted={};for _,path in ipairs(paths) do wanted["ReplicatedStorage."..path]=true end
     local function capture(remote,direction,method,...)
         local path=ctx.remotePaths[remote];if not path then return end
+        local args=table.pack(...);local subject
+        if ctx.shield then
+            subject=hitTrace.shieldSubject(ctx,remote,direction,args)
+            if subject=="otherPlayer" then ctx.report.shield.excludedOtherPlayerEvents=ctx.report.shield.excludedOtherPlayerEvents+1;return end
+            if direction=="in" and remote.Name=="ArmoryEvent" and args[1]=="State" and type(args[2])=="table" and type(rawget(args[2],"gear"))=="table" then
+                local gear=rawget(args[2],"gear");local samples=ctx.report.shield.inventorySamples
+                if #samples>=16 then table.remove(samples,1);ctx.report.shield.inventorySamplesDropped=ctx.report.shield.inventorySamplesDropped+1 end
+                samples[#samples+1]={t=os.clock()-ctx.started,subject=subject,gear=traceValue(gear,0,{},true),oneHitShield=traceValue(rawget(gear,"OneHitShield"),0,{},true)}
+            end
+        end
         local key=direction..":"..path
         local stats=ctx.report.remoteStats[key]
         if not stats then stats={calls=0,sampled=0,suppressed=0};ctx.report.remoteStats[key]=stats end
@@ -1916,14 +2007,14 @@ function API.StartHitDiagnostics(waitForHit)
         if ctx.general then
             local sample=ctx.subscribed[remote][direction]
             if not sample or now-sample.start>=1 then sample={start=now,count=0};ctx.subscribed[remote][direction]=sample end
-            if sample.count>=(direction=="out" and 8 or 4) then stats.suppressed=stats.suppressed+1;return end
+            if sample.count>=(ctx.shield and 16 or (direction=="out" and 8 or 4)) then stats.suppressed=stats.suppressed+1;return end
             sample.count=sample.count+1
         elseif ctx.waiting then
             local last=ctx.subscribed[remote].last or -math.huge
             if now-last<0.25 then stats.suppressed=stats.suppressed+1;return end
             ctx.subscribed[remote].last=now
         end
-        local args=table.pack(...);local data={remote=path,direction=direction,method=method,argumentCount=args.n,arguments={}}
+        local data={remote=path,direction=direction,method=method,argumentCount=args.n,arguments={},subject=subject}
         local seen={};for i=1,math.min(args.n,8) do data.arguments[i]=traceValue(args[i],0,seen,ctx.general) end
         if args.n>8 then data.argumentsTruncated=true end
         stats.sampled=stats.sampled+1
@@ -1943,7 +2034,7 @@ function API.StartHitDiagnostics(waitForHit)
     end
     local function subscribe(remote)
         if ctx.subscribed[remote] or ctx.remoteCount>=160 or not (remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent") or (ctx.general and remote:IsA("RemoteFunction"))) then return end
-        local path=remote:GetFullName();if not (ctx.general and generalRemote(path) or not ctx.general and wanted[path]) then return end
+        local path=remote:GetFullName();if not (ctx.shield and wanted[path] or not ctx.shield and (ctx.general and generalRemote(path) or not ctx.general and wanted[path])) then return end
         ctx.subscribed[remote]={};ctx.remotePaths[remote]=path;ctx.remoteCount=ctx.remoteCount+1
         ctx.report.observedRemotes[#ctx.report.observedRemotes+1]=path
         if not remote:IsA("RemoteFunction") then attach(remote.OnClientEvent,function(...) capture(remote,"in","OnClientEvent",...) end) end
@@ -1963,7 +2054,7 @@ function API.StartHitDiagnostics(waitForHit)
         local watchedValues,watchedFolders={},{}
         local valueCount=0
         local function watchValue(object,localStat)
-            if watchedValues[object] or valueCount>=100 or not object:IsA("ValueBase") then return end
+            if ctx.shield or watchedValues[object] or valueCount>=100 or not object:IsA("ValueBase") then return end
             local path=object:GetFullName()
             if not localStat and not (generalRemote(path) and relevantAttribute(object.Name)) then return end
             local name=string.lower(object.Name)
@@ -2006,14 +2097,16 @@ function API.StartHitDiagnostics(waitForHit)
         end) end
         ctx.report.capabilities.outbound=observeOutbound(ctx,capture)
         local reserves={};for name,value in pairs(hitTrace.reserves) do reserves[name]=value end
-        ctx.report.limits={events=600,inboundPerRemotePerSecond=4,outboundPerRemotePerSecond=8,remotes=160,values=100,maxSeconds=1800,
+        ctx.report.limits={events=600,inboundPerRemotePerSecond=ctx.shield and 16 or 4,outboundPerRemotePerSecond=ctx.shield and 16 or 8,remotes=160,values=100,maxSeconds=ctx.shield and 900 or 1800,
             maxArguments=8,tableDepth=3,tableFields=12,valueNodes=64,stringBytes=96,
             reservedEvents=reserves,remoteSampleGroups=64,attributeSummaries=128,dashCooldownSampleSeconds=5,movementStateSampleSeconds=0.5}
         ctx.report.excluded="Chat, private/admin, audio/bots and high-frequency replication; RemoteFunction callbacks and direct-dot remote calls are not intercepted."
-        traceStatus("Gravando rodada | ate 30 min | saida: "..ctx.report.capabilities.outbound)
+        if ctx.shield then ctx.report.limits.shieldEvents=80;ctx.report.limits.shieldIDs=64;ctx.report.limits.shieldInventorySamples=16 end
+        traceStatus((ctx.shield and "Gravando escudo | ate 15 min | saida: " or "Gravando rodada | ate 30 min | saida: ")..ctx.report.capabilities.outbound)
+        API.TraceToolbar.TraceMarker6.Text=ctx.shield and "Escudo" or "Habil."
         API.TraceToolbar.Visible=true
-        notify("Gravador geral iniciado. Marque suas acoes na barra superior e use Parar ao terminar.")
-        task.delay(1800,function() if state.alive and hitTrace.current==ctx then endHitTrace("generalTimeout",true) end end)
+        notify(ctx.shield and "Gravando seu escudo. Equipe e ative pelo jogo; marque a ativacao e use Encerrar e copiar depois." or "Gravador geral iniciado. Marque suas acoes na barra superior e use Parar ao terminar.")
+        task.delay(ctx.shield and 900 or 1800,function() if state.alive and hitTrace.current==ctx then endHitTrace(ctx.shield and "shieldTimeout" or "generalTimeout",true) end end)
     elseif ctx.waiting then
         hitStatus.Text="Aguardando seu hit | limite: 15 min"
         notify("Analise armada. Jogue normalmente; ela aguarda um sinal de dano/captura por ate 15 minutos.")
