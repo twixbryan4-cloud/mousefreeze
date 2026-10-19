@@ -1,6 +1,18 @@
 # Huss Valley Panel
 
-Versão 0.5.0 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.5.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## ESP e janela na versão 0.5.1
+
+As caixas, os traços, o esqueleto, a direção do olhar e o ponto da cabeça agora são projetados a cada quadro, depois da atualização da câmera e do Lock On do próprio painel. Foi removida a interpolação de posições antigas, que fazia o marcador perseguir alvos rápidos. A projeção acompanha a posição que o cliente possui naquele quadro; não prevê posições futuras nem corrige atrasos de replicação do servidor.
+
+O controle **Dados / contorno**, de 2 a 30 Hz, limita a leitura de cores/textos e a atualização das dimensões do avatar; não limita mais o movimento dos marcadores. As posições dos ossos e a barra de vida acompanham cada quadro. A lista de juntas permanece em cache e os objetos visuais continuam sendo reutilizados. A chave antiga `smoothESP` é aceita nas configurações anteriores, mas não reativa a interpolação atrasada.
+
+O topo da janela e o botão de abertura podem ser arrastados por mouse ou toque em qualquer direção, inclusive além das bordas da tela. O ajuste de escala e as mudanças de orientação não reposicionam nem prendem os elementos ao viewport. Cada alvo aceita um ponteiro por vez; perder o foco libera o arraste. Arrastar o botão não é tratado como um clique para abrir o menu.
+
+Ao abrir, o botão desaparece com um fade de 0,18 s. Ao recolher pelo **X**, pelo botão de minimizar ou pela marca HV, ele reaparece suavemente na posição em que foi deixado. Cliques rápidos cancelam a transição anterior e continuam a partir da transparência atual. O X recolhe a janela e mantém a sessão e os recursos ativos. **Config > Suite > Destroy Menu** continua encerrando o painel e restaurando seus efeitos. A opção antiga de manter o logo sobre a janela aberta foi retirada; a chave `floating` ainda é aceita ao ler configurações anteriores, e o botão fica disponível quando a janela está recolhida.
+
+A validação desta mudança passou em 21 verificações simuladas de ponteiro/transições e 68 de ESP, incluindo alternância de 50 studs por quadro, mudança da câmera, cache de dados, filtros e limpeza. A sintaxe completa e as 88 verificações anteriores de shaders/Auto Zone também passaram. Esses testes não executam a interface nem a renderização dentro do Roblox/Delta.
 
 ## Shaders na versão 0.5.0
 
@@ -10,7 +22,7 @@ Esta implementação usa iluminação e pós-processamento nativos, sem instalar
 
 O controle continua ligado ao mudar de mapa. Descendentes adicionados e peças transmitidas por streaming entram numa fila processada em lotes; peças removidas saem do cache e recuperam seus valores antes de serem reaproveitadas. Para mapas que reutilizam instâncias sem reparentear, os candidatos já conhecidos são reconciliados em lotes após dois segundos sem trabalho pendente. Isso não repete `workspace:GetDescendants()` a cada quadro. Partes de personagens, ferramentas, acessórios, objetos locais, peças móveis, áreas invisíveis e volumes sem uma face plana identificável ficam de fora.
 
-As mudanças da iluminação do mapa são acompanhadas e os dois efeitos próprios são recriados se o jogo os remover. Os efeitos de cor/bloom já existentes no jogo são preservados e podem influenciar o resultado. Desligar restaura os valores anteriores ou a mudança mais recente observada do jogo, destrói somente os efeitos próprios, cancela tarefas antigas e desconecta os cinco observadores desta área. Fechar ou reexecutar o painel faz a mesma limpeza.
+As mudanças da iluminação do mapa são acompanhadas e os dois efeitos próprios são recriados se o jogo os remover. Os efeitos de cor/bloom já existentes no jogo são preservados e podem influenciar o resultado. Desligar restaura os valores anteriores ou a mudança mais recente observada do jogo, destrói somente os efeitos próprios, cancela tarefas antigas e desconecta os cinco observadores desta área. Encerrar por Destroy Menu ou reexecutar o painel faz a mesma limpeza; recolher a janela mantém o efeito ativo.
 
 Shaders, FPS Booster, Low render quality e Environment/Fullbright são mutuamente exclusivos para evitar que uma área sobrescreva o visual da outra. Ligar Shaders desliga esses três controles; ligar um deles desliga Shaders antes de aplicar a alteração. A barra lateral acomoda a nona categoria sem aumentar o painel. O Auto Zone e os demais recursos de gameplay não foram reescritos.
 
@@ -210,7 +222,7 @@ A versão 0.3.0 foi verificada com APIs simuladas para continuidade durante lobb
 
 Foram verificados a sintaxe e os fluxos de controles usando APIs simuladas: construção das oito categorias, navegação, expansão, toque, validação de valores, bloqueio de recursos sem integração, movimento, colisão, câmera, ESP, configurações, restauração, encerramento e reexecução. A versão 0.2 também verifica transparência dos cartões, dimensões da tela, avisos opcionais, migração de configurações, novos membros do personagem, reaproveitamento do preview, interpolação e restauração após respawn. Isso não substitui o teste no Roblox/Delta; não há uma sessão desse jogo disponível neste ambiente.
 
-As opções começam desligadas. O ESP possui frequência e distância configuráveis. Varreduras do cenário são feitas por lote ao ativar recursos ou solicitar o diagnóstico. Fechar pelo X ou por Destroy Menu desconecta os eventos, remove objetos locais e tenta restaurar as propriedades alteradas. Executar novamente substitui a instância anterior.
+As opções começam desligadas. O ESP possui frequência de dados e distância configuráveis, com movimento projetado por quadro. Varreduras do cenário são feitas por lote ao ativar recursos ou solicitar o diagnóstico. O X recolhe a janela. Destroy Menu desconecta os eventos, remove objetos locais e tenta restaurar as propriedades alteradas. Executar novamente substitui a instância anterior.
 
 ## Referências das APIs do motor
 

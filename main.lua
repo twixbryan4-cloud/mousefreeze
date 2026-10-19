@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.5.0
+-- Huss Valley Panel 0.5.1
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -28,7 +28,7 @@ local defaults = {
     autoVote=false, disableGameAFK=false, antiIdle=false, antiHit=false,
     esp=false, boxes=true, names=true, tracers=false, health=true, distance=true,
     skeleton=false, headDot=false, healthText=false, roleColors=true, teamFilter=false,
-    espRange=1500, espRate=15, smoothESP=true, chams=false, viewTracer=false, nameHider=false, headless=false,
+    espRange=1500, espRate=15, smoothESP=true, chams=false, viewTracer=false, nameHider=false, headless=false, -- smoothESP is accepted for old configs; geometry follows every frame.
     hitbox=false, leaderboard=false, gems=false,
     fpsBoost=false, removeTextures=true, removeDecals=true, removeParticles=true,
     lowDetail=true, noShadows=true, noFog=true, removeAccessories=false,
@@ -45,7 +45,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.5.0", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.5.1", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -68,6 +68,12 @@ end)
 listen(Input.InputEnded,function(input)
     local session=pointerSessions[input];pointerSessions[input]=nil
     if session and session.finish then session.finish(input) end
+end)
+listen(Input.WindowFocusReleased,function()
+    for input,session in pairs(pointerSessions) do
+        pointerSessions[input]=nil
+        if session.finish then session.finish(input) end
+    end
 end)
 local function create(class,props,parent)
     local object=Instance.new(class)
@@ -303,7 +309,9 @@ local body=create("Frame",{Name="Body",Position=UDim2.fromOffset(68,38),Size=UDi
 local footer=text(window,"HUSS VALLEY  /  v"..API.Version,9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
 themed(footer,"TextColor3","muted")
 local fpsLabel=text(window,"-- FPS",9,{Name="FPS",Position=UDim2.new(1,-90,1,-23),Size=UDim2.fromOffset(72,14),TextXAlignment=Enum.TextXAlignment.Right})
-local floating=button(gui,"HV",13,{Name="FloatingButton",Position=UDim2.new(0,12,0.36,0),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
+API.UI={FloatingHost=create("CanvasGroup",{Name="FloatingHost",Position=UDim2.new(0,9,0.36,-3),Size=UDim2.fromOffset(48,48),
+    BackgroundTransparency=1,GroupTransparency=1,Visible=false,ZIndex=20},gui)}
+local floating=button(API.UI.FloatingHost,"HV",13,{Name="FloatingButton",Position=UDim2.fromOffset(3,3),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
 accented(floating,"TextColor3"); accented(create("UIStroke",{Thickness=1,Transparency=0.4},floating),"Color")
 local flightPad=create("Frame",{Name="FlightControls",Position=UDim2.new(1,-66,0.5,-45),Size=UDim2.fromOffset(50,96),BackgroundTransparency=1,Visible=false},gui)
 local flyUp=button(flightPad,"+",22,{Name="FlyUp",Size=UDim2.fromOffset(44,42)})
@@ -312,41 +320,70 @@ fit=function()
     local cam=workspace.CurrentCamera
     local size=cam and cam.ViewportSize or Vector2.new(1280,720)
     scale.Scale=math.max(0.25,math.min((size.X-24)/730,(size.Y-32)/438,1.1)*cfg.uiScale)
-    -- User scaling may not push the panel outside the screen.
+    -- Fit the size without changing either user-dragged position.
     scale.Scale=math.min(scale.Scale,(size.X-16)/730,(size.Y-24)/438)
-    local halfW,halfH=365*scale.Scale,219*scale.Scale
-    window.Position=UDim2.fromOffset(math.clamp(window.Position.X.Scale*size.X+window.Position.X.Offset,halfW,size.X-halfW),
-        math.clamp(window.Position.Y.Scale*size.Y+window.Position.Y.Offset,halfH,size.Y-halfH))
     toast.Size=UDim2.fromOffset(math.min(300,math.max(120,size.X-28)),58)
 end
-local function show(value)
-    state.visible=value; window.Visible=value
-    tooltip.Visible=false
-    floating.Visible=cfg.floating or not value
-    if value then if refreshAccent then refreshAccent() end;applyAppearance() end
-end
-listen(floating.Activated,function() show(not state.visible) end)
-listen(brand.Activated,function() show(false) end)
-listen(minimize.Activated,function() show(false) end)
-local function draggable(handle,target,isFloating)
-    listen(handle.InputBegan,function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+local show
+do
+    local ui=API.UI
+    local fadeTween,fadeConnection
+    local floatingDrag={moved=false,suppressUntil=0}
+    local function stopFade()
+        if fadeConnection then fadeConnection:Disconnect();fadeConnection=nil end
+        if fadeTween then fadeTween:Cancel();fadeTween=nil end
+    end
+    ui.Stop=stopFade
+    function ui.UpdateFloating(immediate)
+        stopFade()
+        local wanted=not state.visible
+        local host=ui.FloatingHost
+        if immediate then host.GroupTransparency=wanted and 0 or 1;host.Visible=wanted;return end
+        if wanted then host.Visible=true end
+        if not host.Visible then host.GroupTransparency=1;return end
+        fadeTween=Tween:Create(host,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{GroupTransparency=wanted and 0 or 1})
+        local activeTween=fadeTween
+        fadeConnection=activeTween.Completed:Connect(function()
+            if fadeTween~=activeTween then return end
+            fadeConnection:Disconnect();fadeConnection=nil;fadeTween=nil
+            if state.alive and host.Parent then host.Visible=not state.visible end
+        end)
+        activeTween:Play()
+    end
+    show=function(value)
+        if not state.alive then return end
+        state.visible=value;window.Visible=value;tooltip.Visible=false
+        ui.UpdateFloating()
+        if value then if refreshAccent then refreshAccent() end;applyAppearance() end
+    end
+    local function draggable(handle,target,dragState)
+        local activeInput
+        listen(handle.InputBegan,function(input)
+            if activeInput or (input.UserInputType~=Enum.UserInputType.MouseButton1 and input.UserInputType~=Enum.UserInputType.Touch) then return end
+            activeInput=input
             local start,startPos=input.Position,target.Position
+            if dragState then dragState.moved=false end
             beginPointer(input,function(current)
-            local delta=current.Position-start
-            local cam=workspace.CurrentCamera; if not cam then return end
-            local view=cam.ViewportSize
-            local x=startPos.X.Scale*view.X+startPos.X.Offset+delta.X
-            local y=startPos.Y.Scale*view.Y+startPos.Y.Offset+delta.Y
-            local halfW=isFloating and 0 or 365*scale.Scale
-            local halfH=isFloating and 0 or 219*scale.Scale
-            target.Position=UDim2.fromOffset(math.clamp(x,halfW,view.X-(isFloating and 42 or halfW)),
-                math.clamp(y,halfH,view.Y-(isFloating and 42 or halfH)))
+                local delta=current.Position-start
+                if dragState and delta.X*delta.X+delta.Y*delta.Y>=25 then
+                    dragState.moved=true;dragState.suppressUntil=os.clock()+0.2
+                end
+                target.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
+            end,function()
+                activeInput=nil
+                if dragState and dragState.moved then dragState.suppressUntil=os.clock()+0.2 end
             end)
-        end
+        end)
+    end
+    draggable(dragbar,window)
+    draggable(floating,ui.FloatingHost,floatingDrag)
+    listen(floating.Activated,function()
+        if not state.visible and not floatingDrag.moved and os.clock()>=floatingDrag.suppressUntil then show(true) end
     end)
+    listen(brand.Activated,function() show(false) end)
+    listen(minimize.Activated,function() show(false) end)
+    listen(close.Activated,function() show(false) end)
 end
-draggable(dragbar,window,false)
 
 -- Icons are made from GUI primitives, without fonts or remote image dependencies.
 local function line(parent,x1,y1,x2,y2,color,thickness)
@@ -598,7 +635,7 @@ local info=card(left,"Huss Valley / integracao",nil,"O caminho do mapa, zonas se
 actionButton(info,"Copiar diagnostico",function() API.ExportDiagnostics() end)
 
 left,right=page("ESP",4)
-c=card(left,"Players","esp","Marcadores locais. Atualizacao limitada para reduzir o custo no celular.")
+c=card(left,"Players","esp","Marcadores acompanham a posicao atual a cada quadro, depois da camera. Dados e limites do avatar usam cache.")
 for _,v in ipairs({{"Boxes","boxes"},{"Names","names"},{"Tracers","tracers"},{"Health","health"},{"Distance","distance"},
     {"Skeleton","skeleton"},{"Head Dot","headDot"},{"Health Text","healthText"}}) do checkbox(c,v[1],v[2]) end
 c=card(left,"Roles & Threat",nil,"Cores por papel publicado pelo jogo: catcher em vermelho e runner em verde. Usa o time quando nao ha papel disponivel.")
@@ -607,7 +644,7 @@ c=card(left,"Appearance",nil);cycle(c,"Accent","accent",{"Peach","Purple","Blue"
 card(left,"View Tracer","viewTracer","Mostra a direcao em que os outros jogadores olham.")
 pending(left,"Leaderboard Visuals","leaderboard")
 card(left,"Name Hider","nameHider","Oculta o nome padrao sobre seu personagem apenas neste cliente.")
-c=card(right,"Settings",nil);slider(c,"Max distance","espRange",50,3000,50," studs");slider(c,"Update rate","espRate",2,30,1," Hz");checkbox(c,"ESP suave","smoothESP")
+c=card(right,"Settings",nil);slider(c,"Max distance","espRange",50,3000,50," studs");slider(c,"Dados / contorno","espRate",2,30,1," Hz")
 card(right,"Chams","chams","Contorno local dos jogadores com Highlight.")
 pending(right,"Hit Box","hitbox");pending(right,"Gems & Coins","gems")
 card(right,"Headless","headless","Esconde sua cabeca apenas neste cliente.")
@@ -684,7 +721,7 @@ slider(c,"Escala do menu","uiScale",0.45,1.6,0.05,"x");cycle(c,"Theme","theme",{
 slider(c,"Transparencia","transparency",0,85,1,"%");checkbox(c,"Notificacoes","notifications");checkbox(c,"Sound Effects","sounds")
 cycle(c,"Accent Color","accent",{"Peach","Purple","Blue","Pink","Green"});checkbox(c,"Rainbow Accent","rainbow")
 customizeExpand()
-c=card(left,"Interface",nil);cycle(c,"Toggle Menu Key","toggleKey",{"RightShift","LeftAlt","Insert","F4"});checkbox(c,"Floating Logo Button","floating")
+c=card(left,"Interface",nil,"O botao aparece ao recolher a janela. Arraste o botao ou o topo do painel livremente.");cycle(c,"Toggle Menu Key","toggleKey",{"RightShift","LeftAlt","Insert","F4"})
 actionButton(c,"Reset Position",function() window.Position=UDim2.fromScale(0.5,0.46);fit() end)
 do
     local content=card(left,"Gravador geral",nil,"Grava ate 30 min, inclusive lobby e respawns. Use os marcadores logo apos cada acao. Ao terminar, copie as partes ou salve o JSON.")
@@ -741,7 +778,7 @@ actions.uiScale=fit
 actions.transparency=function(v) cfg.opacity=1-v/100;uiDirty=true end
 actions.opacity=function(v) set("transparency",(1-v)*100,true) end
 actions.theme=refreshTheme;actions.accent=refreshAccent;actions.rainbow=refreshAccent
-actions.floating=function(v) floating.Visible=v or not state.visible end
+actions.floating=function() API.UI.UpdateFloating() end -- old configs retain this key; the closed menu always has a launcher.
 
 -- Character and camera features.
 local flight
@@ -1626,28 +1663,18 @@ local function moveLine(object,x1,y1,x2,y2)
     local dx,dy=x2-x1,y2-y1;object.Position=UDim2.fromOffset((x1+x2)/2,(y1+y2)/2)
     object.Size=UDim2.fromOffset(math.sqrt(dx*dx+dy*dy),1);object.Rotation=math.deg(math.atan2(dy,dx))
 end
-local function setESPBounds(r,x,y,w,h)
-    if r.desired and math.abs(r.desired[1]-x)<0.02 and math.abs(r.desired[2]-y)<0.02 and math.abs(r.desired[3]-w)<0.02 and math.abs(r.desired[4]-h)<0.02 then return end
-    r.desired={x,y,w,h}
-    if not r.draw or not cfg.smoothESP then
-        r.draw={x,y,w,h};r.frame.Position=UDim2.fromOffset(x,y);r.frame.Size=UDim2.fromOffset(w,h)
-    end
-    r.moving=true
-end
 local function writeChanged(object,property,value) if object[property]~=value then object[property]=value end end
-local function renderESP(dt)
-    if not cfg.smoothESP or not (cfg.esp or cfg.viewTracer) then return end
-    local alpha=1-math.exp(-24*dt)
-    for _,r in pairs(espRecords) do
-        if r.frame.Visible and r.moving and r.draw and r.desired then
-            local largest=0
-            for i=1,4 do local delta=r.desired[i]-r.draw[i];largest=math.max(largest,math.abs(delta));r.draw[i]=r.draw[i]+delta*alpha end
-            if largest<0.05 then r.moving=false;for i=1,4 do r.draw[i]=r.desired[i] end end
-            r.frame.Position=UDim2.fromOffset(r.draw[1],r.draw[2]);r.frame.Size=UDim2.fromOffset(r.draw[3],r.draw[4])
-        end
-    end
+local function setESPBounds(r,x,y,w,h)
+    writeChanged(r.frame,"Position",UDim2.fromOffset(x,y))
+    writeChanged(r.frame,"Size",UDim2.fromOffset(w,h))
 end
-local function updateESP()
+local updateESP
+local function renderESP(dt)
+    if not (cfg.esp or cfg.chams or cfg.viewTracer) then return end
+    state.espClock=(state.espClock or 0)+dt
+    updateESP(false)
+end
+updateESP=function(forceData)
     local cam=workspace.CurrentCamera;local _,_,localRoot=character()
     if not cam or not localRoot then for p in pairs(espRecords) do clearRecord(p) end;return end
     if not (cfg.esp or cfg.chams or cfg.viewTracer) then for p in pairs(espRecords) do clearRecord(p) end;return end
@@ -1658,14 +1685,22 @@ local function updateESP()
             local eligible=root and h and h.Health>0 and dist<=cfg.espRange and not(cfg.teamFilter and sameTeam(p))
             if not eligible then clearRecord(p)
             else
-                local r=recordFor(p);local color=cfg.roleColors and API.Native.ESPColor(p) or accent
+                local r=recordFor(p)
+                local now=state.espClock or 0
+                local dataDue=forceData or r.dataCharacter~=ch or not r.nextData or now>=r.nextData
+                if dataDue then
+                    r.color=cfg.roleColors and API.Native.ESPColor(p) or accent
+                    r.dataCharacter=ch;r.nextData=now+1/cfg.espRate
+                end
+                local color=r.color or accent
                 writeChanged(r.highlight,"Enabled",cfg.chams);writeChanged(r.highlight,"Adornee",ch);writeChanged(r.highlight,"FillColor",color);writeChanged(r.highlight,"OutlineColor",color)
                 local center,on=cam:WorldToViewportPoint(root.Position)
                 writeChanged(r.frame,"Visible",on and (cfg.esp or cfg.viewTracer))
                 if on and (cfg.esp or cfg.viewTracer) then
-                    if r.boundsCharacter~=ch or not r.nextBounds or (state.elapsed or 0)>=r.nextBounds then
+                    dataDue=dataDue or r.boundsCharacter~=ch or not r.boundOffset
+                    if dataDue then
                         local bounds,size=ch:GetBoundingBox();r.boundOffset=root.CFrame:ToObjectSpace(bounds);r.boundSize=size
-                        r.boundsCharacter=ch;r.nextBounds=(state.elapsed or 0)+0.5
+                        r.boundsCharacter=ch
                     end
                     local cf,size=root.CFrame*r.boundOffset,r.boundSize
                     local minX,minY,maxX,maxY=math.huge,math.huge,-math.huge,-math.huge
@@ -1678,9 +1713,12 @@ local function updateESP()
                     if validBox then
                         setESPBounds(r,minX,minY,maxX-minX,maxY-minY)
                         writeChanged(r.box,"Visible",cfg.esp and cfg.boxes);writeChanged(r.stroke,"Color",color)
-                        writeChanged(r.name,"Visible",cfg.esp and cfg.names);writeChanged(r.name,"Text",p.DisplayName)
+                        writeChanged(r.name,"Visible",cfg.esp and cfg.names)
                         writeChanged(r.detail,"Visible",cfg.esp and (cfg.distance or cfg.healthText))
-                        writeChanged(r.detail,"Text",(cfg.distance and string.format("%d studs",math.floor(dist)) or "")..(cfg.healthText and string.format("  %d HP",math.floor(h.Health)) or ""))
+                        if dataDue then
+                            writeChanged(r.name,"Text",p.DisplayName)
+                            writeChanged(r.detail,"Text",(cfg.distance and string.format("%d studs",math.floor(dist)) or "")..(cfg.healthText and string.format("  %d HP",math.floor(h.Health)) or ""))
+                        end
                         writeChanged(r.hp,"Visible",cfg.esp and cfg.health)
                         local healthRatio=math.clamp(h.Health/math.max(1,h.MaxHealth),0,1)
                         if r.healthRatio~=healthRatio then r.healthRatio=healthRatio;r.hp.Size=UDim2.new(0,2,healthRatio,0) end
@@ -1717,7 +1755,9 @@ local function updateESP()
     end
 end
 listen(Players.PlayerRemoving,clearRecord)
-for _,key in ipairs({"esp","chams","viewTracer"}) do actions[key]=updateESP end
+for _,key in ipairs({"esp","chams","viewTracer","boxes","names","distance","health","healthText","tracers","headDot","skeleton","roleColors","teamFilter","espRange","espRate","smoothESP"}) do
+    actions[key]=function() updateESP(true) end
+end
 local previewCharacter
 refreshPreview=function()
     if not state.alive or state.page~="ESP" then return end
@@ -2496,13 +2536,13 @@ end
 end
 
 -- One heartbeat and one late camera update. Expensive work is rate-limited.
-local elapsed,speedElapsed,promptElapsed,attackElapsed,gearElapsed,espElapsed,hueElapsed,aimElapsed=0,0,0,0,0,0,0,0
+local elapsed,speedElapsed,promptElapsed,attackElapsed,gearElapsed,hueElapsed,aimElapsed=0,0,0,0,0,0,0
 actions.lockOn=function() state.aimTarget=nil;aimElapsed=1 end
 actions.radius=function() aimElapsed=1 end
 actions.teamCheck=function() aimElapsed=1 end
 listen(Run.Heartbeat,function(dt)
     if not state.alive then return end
-    elapsed=elapsed+dt;state.elapsed=elapsed;speedElapsed=speedElapsed+dt;promptElapsed=promptElapsed+dt;attackElapsed=attackElapsed+dt;gearElapsed=gearElapsed+dt;espElapsed=espElapsed+dt;hueElapsed=hueElapsed+dt;aimElapsed=aimElapsed+dt
+    elapsed=elapsed+dt;state.elapsed=elapsed;speedElapsed=speedElapsed+dt;promptElapsed=promptElapsed+dt;attackElapsed=attackElapsed+dt;gearElapsed=gearElapsed+dt;hueElapsed=hueElapsed+dt;aimElapsed=aimElapsed+dt
     local char,hum,root=character();local cam=workspace.CurrentCamera
     if speedElapsed>=0.1 then speedElapsed=0;applySpeed() end
     if root and hum and hum.Health>0 then
@@ -2523,7 +2563,6 @@ listen(Run.Heartbeat,function(dt)
         if cfg.autoGears and gearElapsed>=cfg.gearDelay then gearElapsed=0;triggerTool() end
     end
     if promptElapsed>=cfg.promptDelay then promptElapsed=0;processPrompts() end
-    if espElapsed>=1/cfg.espRate then espElapsed=0;updateESP() end
     if cfg.lockOn and aimElapsed>=0.1 then aimElapsed=0;state.aimTarget=nearest(cfg.radius) end
     stepAdapters(dt)
     if hueElapsed>=0.15 then hueElapsed=0;if cfg.rainbow then refreshAccent() end end
@@ -2533,7 +2572,6 @@ Run:BindToRenderStep(renderBindingName,Enum.RenderPriority.Camera.Value+1,functi
     if not state.alive then return end
     state.frames=state.frames+1;state.time=state.time+dt
     if uiDirty and state.visible then applyAppearance() end
-    renderESP(dt)
     if cfg.unlockMouse then patch("mouse",Input,"MouseBehavior",Enum.MouseBehavior.Default) end
     local _,hum,root=character();local cam=workspace.CurrentCamera
     if cfg.lockOn and cam and root and hum and hum.Health>0 then
@@ -2548,6 +2586,7 @@ Run:BindToRenderStep(renderBindingName,Enum.RenderPriority.Camera.Value+1,functi
             end
         end
     end
+    renderESP(dt) -- project current poses after all camera changes, without positional interpolation.
     if state.time>=0.75 then fpsLabel.Text=string.format("%d FPS",math.floor(state.frames/state.time+0.5));state.frames=0;state.time=0 end
 end)
 listen(player.CharacterAdded,function()
@@ -2564,6 +2603,8 @@ end)
 function API.Destroy()
     if not state.alive then return end
     state.alive=false;perfToken=perfToken+1;xrayToken=xrayToken+1
+    if API.UI then API.UI.Stop() end
+    for input in pairs(pointerSessions) do pointerSessions[input]=nil end
     if API.Shaders then API.Shaders.Stop() end
     endHitTrace("panelClosed",false)
     if API.Native and API.Native.ReleaseDashInput then API.Native.ReleaseDashInput() end
@@ -2579,7 +2620,6 @@ function API.Destroy()
     visuals:Destroy();gui:Destroy()
     if env.HussValleyPanel==API then env.HussValleyPanel=nil end
 end
-listen(close.Activated,API.Destroy)
 fit();refreshTheme();selectPage("Combat")
 window.Visible=false
 task.defer(function()
