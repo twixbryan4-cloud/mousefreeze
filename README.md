@@ -1,6 +1,22 @@
 # Huss Valley Panel
 
-Versão 0.3.0 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.3.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Correção do gravador na versão 0.3.1
+
+A amostra recebida registrou 2.112 eventos em aproximadamente 255 segundos e descartou 1.512. A versão 0.3.0 tratava qualquer atributo como mais importante que uma chamada remota. As atualizações frequentes de `Character.DashCooldownUntil` acabaram expulsando argumentos de ações do histórico, embora os contadores de chamadas permanecessem no relatório. O trecho enviado também terminou antes do fim do JSON.
+
+A correção conserva o limite de memória e muda a retenção:
+
+- `DashCooldownUntil` recebe uma amostra a cada cinco segundos e `MovementState`, no máximo duas por segundo. `attributeStats` conserva contagem de mudanças, primeira referência, último valor/horário e quantidade de alterações agrupadas. Mudanças de papel, captura e booleanos de atividade continuam sendo registradas individualmente.
+- O histórico de 600 eventos compartilha espaço com reservas para saída (180), entrada (140), sinais locais importantes (100), outros estados (80) e telemetria repetitiva (100). Cada grupo pode ocupar espaço ocioso; quando o histórico enche, um grupo sobrecarregado não pode apagar outro abaixo de sua reserva. Eventos antigos do próprio grupo ainda podem ser substituídos.
+- `remoteSamples` guarda a primeira e a amostra mais recente por caminho, direção e identificador de ação, independentemente da remoção no histórico cronológico. São até 64 grupos, com no máximo duas amostras por grupo. O identificador vem do primeiro argumento de texto ou de campos conhecidos do primeiro argumento em tabela; não se presume que isso revele o significado da ação. O contador `remoteSampleEventsOmitted` informa eventos amostrados que não entraram nesse arquivo de amostras quando ele atingiu o limite.
+- Ao parar o modo geral, o painel copia um **resumo de ações**, em partes, com os argumentos preservados e até 24 marcadores recentes. **Copiar resumo de ações** recria essa exportação; **Copiar próxima parte** continua o resumo. O JSON completo continua disponível em **Salvar JSON** e **Copiar tudo**. Salvar o arquivo não muda a sequência de partes do resumo.
+- `GameRole` e `RunState`, observados na amostra real, também aparecem no diagnóstico estático. O modo **Aguardar meu hit** reconhece a transição `GameRole: Runner → Catcher` como um sinal a analisar; uma entrada no papel de Catcher a partir do lobby não dispara essa detecção. Isso não prova dano nem invulnerabilidade.
+
+O registro confirmou que a observação de saída funcionou na sessão enviada (`outbound = installed`, sem erros do coletor). `MeleeEvent`, `BoostRequest` e outros endpoints tiveram chamadas contadas. O trecho recebido não preserva argumentos suficientes para implementar esses comandos. Os valores de vida permaneceram em 100 e `healthDecreases` foi zero; as regras de captura/morte ainda precisam ser determinadas pelos eventos e estados correspondentes. Atributos de horário são mantidos no domínio original, sem presumir que todos usem o mesmo relógio.
+
+O teste de regressão reproduz 2.040 mudanças do contador, alternâncias de movimento e uma segunda enxurrada de estados. Ele falha na versão 0.3.0 por perda dos argumentos e passa na 0.3.1, preservando chamadas raras, marcadores e sinais locais. Também foram verificados ocupação das reservas, arquivo independente de amostras, limites do resumo, nova detecção por `GameRole` e limpeza. São testes com APIs simuladas; a correção ainda precisa ser executada no Roblox/Delta.
 
 ## Gravador geral na versão 0.3.0
 
@@ -21,17 +37,17 @@ A captura de saída requer `getrawmetatable`, `getnamecallmethod`, `setreadonly`
 
 ### Copiar ou salvar o resultado
 
-1. Use **Parar** na barra superior ou **Encerrar e copiar** no cartão. O painel copia a primeira parte do JSON e mostra `parte 1/N`.
-2. Envie essa parte e use **Copiar próxima parte** para copiar as seguintes, até enviar todas. Cada mensagem leva um identificador da sessão e sua numeração. As partes são fragmentos, na ordem, de um único JSON.
+1. Use **Parar** na barra superior ou **Encerrar e copiar** no cartão. O painel copia a primeira parte do resumo de ações e mostra `parte 1/N`.
+2. Envie essa parte e use **Copiar próxima parte** para copiar as seguintes, até enviar todas. Cada mensagem leva um identificador da sessão e sua numeração. As partes são fragmentos, na ordem, do JSON indicado no cabeçalho (`ações` ou `completo`).
 3. **Copiar tudo** copia o registro completo. **Salvar JSON** cria `huss-valley-trace-<sessão>.json` nos arquivos do executor, quando há `writefile`; também é possível enviar esse arquivo inteiro. Sem clipboard, há um campo selecionável.
 
-O registro é limitado a 600 eventos, priorizando preservar marcadores e mudanças locais ao descartar eventos remotos/estados antigos. Eventos recebidos são amostrados até quatro vezes por segundo por endpoint; os de saída, até oito. Os contadores registram chamadas observadas e amostras omitidas. Um burst pode omitir uma ação específica; se isso acontecer, uma gravação curta focada nessa ação ajuda a reduzir a ambiguidade. Há limites adicionais de 160 remotes, 100 valores, oito argumentos, profundidade de tabela de três níveis, 12 campos por tabela e strings de até 96 bytes; valores maiores são resumidos. As partes copiadas têm até 9.000 bytes de JSON, além do cabeçalho, sem dividir caracteres UTF-8.
+O histórico cronológico é limitado a 600 eventos, com a retenção por grupo descrita acima. As amostras independentes e os resumos de atributos têm seus próprios limites. Eventos recebidos são amostrados até quatro vezes por segundo por endpoint; os de saída, até oito. Os contadores registram chamadas observadas e amostras omitidas. Um burst pode omitir uma ação específica; se isso acontecer, uma gravação curta focada nessa ação ajuda a reduzir a ambiguidade. Há limites adicionais de 160 remotes, 100 valores, oito argumentos, profundidade de tabela de três níveis, 12 campos por tabela e strings de até 96 bytes; valores maiores são resumidos. As partes copiadas têm até 9.000 bytes de JSON, além do cabeçalho, sem dividir caracteres UTF-8.
 
 Chat, remotes administrativos/privados, áudio, bots e replicação contínua não são coletados. Textos curtos dos remotes de gameplay incluídos são preservados para mapear ações; chaves como token, secret, password e auth são omitidas/redigidas. O resultado permanece no dispositivo até ser compartilhado pelo usuário. Nenhum código do servidor é obtido, e proximidade temporal entre eventos não prova a causa de um hit ou uma eliminação.
 
 Ao encerrar, os listeners são desconectados. O observador de saída restaura a função anterior quando ainda ocupa o topo da cadeia; se outro script adicionou um observador depois, a coleta é desativada sem remover o script posterior. Essa ponte inativa é reaproveitada em vez de empilhar novas pontes a cada gravação.
 
-API adicional: `StartGeneralDiagnostics()`, `MarkDiagnostics("Zona")`, `StopHitDiagnostics(true)`, `CopyNextDiagnosticsPart(indiceOpcional)`, `CopyHitDiagnostics()` e `SaveDiagnostics()`. O último resultado geral fica em `LastGeneralDiagnostics`. As funções de gameplay pendentes continuam precisando de integrações confirmadas; gravar um evento não as implementa automaticamente.
+API adicional: `StartGeneralDiagnostics()`, `MarkDiagnostics("Zona")`, `StopHitDiagnostics(true)`, `CopyActionDiagnostics()`, `CopyNextDiagnosticsPart(indiceOpcional)`, `CopyHitDiagnostics()` e `SaveDiagnostics()`. O último resultado geral fica em `LastGeneralDiagnostics`. As funções de gameplay pendentes continuam precisando de integrações confirmadas; gravar um evento não as implementa automaticamente.
 
 ## Alterações da versão 0.2.0
 
