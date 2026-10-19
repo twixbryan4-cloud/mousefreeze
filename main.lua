@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.5.1
+-- Huss Valley Panel 0.6.0
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -19,6 +19,7 @@ end
 local defaults = {
     movement=false, speedBoost=false, walkSpeed=24, fly=false, flySpeed=50,
     noclip=false, tpWalk=false, tpSpeed=16, infiniteJump=false, spin=false, spinSpeed=120,
+    autoJumpButton=false, freezeButton=false, autoJumpInterval=0.15, freezeDuration=0.12, freezeCooldown=1,
     firstPerson=false, unlockMouse=false, fov=70, customFov=false, fullbright=false, xray=false,
     lockOn=false, radius=30, prediction=0.12, aimSmooth=12, faceTarget=false, teamCheck=false,
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
@@ -27,7 +28,7 @@ local defaults = {
     autoAbility=false, dashSide="Right",dashRange=15,dashDelay=1,dashKey="Q",tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
     autoVote=false, disableGameAFK=false, antiIdle=false, antiHit=false,
     esp=false, boxes=true, names=true, tracers=false, health=true, distance=true,
-    skeleton=false, headDot=false, healthText=false, roleColors=true, teamFilter=false,
+    skeleton=false, headDot=false, healthText=false, roleColors=true, teamFilter=false, espTeams=false,
     espRange=1500, espRate=15, smoothESP=true, chams=false, viewTracer=false, nameHider=false, headless=false, -- smoothESP is accepted for old configs; geometry follows every frame.
     hitbox=false, leaderboard=false, gems=false,
     fpsBoost=false, removeTextures=true, removeDecals=true, removeParticles=true,
@@ -43,9 +44,9 @@ local cfg = {}
 for key,value in pairs(defaults) do cfg[key]=value end
 local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}, {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
-local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
+local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.5.1", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.0", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -149,18 +150,114 @@ if type(gethui)=="function" then parented=pcall(function() gui.Parent=gethui() e
 if not parented then parented=pcall(function() gui.Parent=game:GetService("CoreGui") end) end
 if not parented then gui.Parent=player:WaitForChild("PlayerGui",10) end
 if not gui.Parent then gui:Destroy(); error("Nao foi possivel abrir a interface.") end
-local boot=create("Frame",{Name="Welcome",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.46),
-    Size=UDim2.fromOffset(280,104),BackgroundColor3=colors.card,BorderSizePixel=0,ZIndex=40},gui)
-round(boot,9)
-accented(create("UIStroke",{Thickness=0.8,Transparency=0.55},boot),"Color")
-local bootAvatar=create("ImageLabel",{Image="rbxthumb://type=AvatarHeadShot&id="..player.UserId.."&w=100&h=100",
-    Size=UDim2.fromOffset(36,36),Position=UDim2.fromOffset(14,14),BackgroundTransparency=1},boot);round(bootAvatar,99)
-accented(text(boot,"Welcome,",10,{Position=UDim2.fromOffset(62,12),Size=UDim2.fromOffset(200,16)}),"TextColor3")
-text(boot,player.DisplayName,14,{Position=UDim2.fromOffset(62,30),Size=UDim2.fromOffset(200,20),Font=Enum.Font.GothamBold})
-local bootStatus=text(boot,"Building interface...",9,{Position=UDim2.fromOffset(14,66),Size=UDim2.fromOffset(250,16)})
-local bootTrack=create("Frame",{Position=UDim2.fromOffset(14,88),Size=UDim2.fromOffset(252,3),BackgroundColor3=Color3.fromRGB(63,49,65),BorderSizePixel=0},boot)
-local bootFill=accented(create("Frame",{Size=UDim2.fromScale(0.1,1),BorderSizePixel=0},bootTrack),"BackgroundColor3")
-local function bootProgress(value,message) bootFill.Size=UDim2.fromScale(value,1);bootStatus.Text=message end
+-- Temporary cinematic loading screen: native GUI, no downloaded artwork or libraries.
+local boot,bootProgress
+do
+    local loading={active=true,tweens={},started=os.clock(),target=0}
+    API.Loading=loading
+    local blue=Color3.fromRGB(112,170,255)
+    local coral=Color3.fromRGB(247,166,152)
+    local lavender=Color3.fromRGB(170,145,251)
+    boot=create("Frame",{Name="Welcome",Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.fromRGB(8,10,20),
+        BorderSizePixel=0,Active=true,ZIndex=70},gui)
+    create("UIGradient",{Rotation=32,Color=ColorSequence.new(Color3.fromRGB(15,20,42),Color3.fromRGB(8,8,15))},boot)
+    local content=create("CanvasGroup",{Name="LoadingCard",AnchorPoint=Vector2.new(0.5,0.5),
+        Position=UDim2.fromScale(0.5,0.48),Size=UDim2.fromOffset(560,310),
+        BackgroundTransparency=1,GroupTransparency=1,ZIndex=72},boot)
+    local sizing=create("UIScale",{Scale=1},content)
+    function loading.Fit(size)
+        if loading.active then sizing.Scale=math.max(0.2,math.min(1,(size.X-30)/560,(size.Y-34)/330)) end
+    end
+    loading.Fit(workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280,720))
+    local function animate(object,props,duration,repeatCount)
+        local t=Tween:Create(object,TweenInfo.new(duration,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,repeatCount or 0),props)
+        loading.tweens[#loading.tweens+1]=t;t:Play();return t
+    end
+    local function label(value,size,x,y,w,h,color,font)
+        return create("TextLabel",{Text=value,TextSize=size,Font=font or Enum.Font.GothamMedium,
+            TextColor3=color or Color3.fromRGB(239,241,255),BackgroundTransparency=1,
+            Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),
+            TextXAlignment=Enum.TextXAlignment.Center,ZIndex=74},content)
+    end
+    for i=1,28 do
+        local dot=create("Frame",{Position=UDim2.fromScale(((i*37)%97)/100,((i*53)%89)/100),
+            Size=UDim2.fromOffset(i%4==0 and 3 or 2,i%4==0 and 3 or 2),
+            BackgroundColor3=i%2==0 and blue or coral,BackgroundTransparency=0.65+(i%3)*0.08,
+            BorderSizePixel=0,ZIndex=71},boot);round(dot,9)
+    end
+    for i=1,3 do
+        local orbit=create("Frame",{AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.48),
+            Size=UDim2.fromScale(0.48+i*0.12,0.48+i*0.12),BackgroundTransparency=1,
+            Rotation=i*23,ZIndex=71},boot)
+        round(orbit,999)
+        create("UIStroke",{Color=i%2==0 and blue or lavender,Transparency=0.93,Thickness=1},orbit)
+    end
+    local emblem=create("Frame",{AnchorPoint=Vector2.new(0.5,0),Position=UDim2.fromOffset(280,10),
+        Size=UDim2.fromOffset(52,52),BackgroundColor3=Color3.fromRGB(23,28,49),BorderSizePixel=0,Rotation=45,ZIndex=73},content)
+    round(emblem,13);create("UIStroke",{Color=blue,Transparency=0.25,Thickness=1},emblem)
+    create("UIGradient",{Rotation=45,Color=ColorSequence.new(blue,lavender)},emblem)
+    local monogram=create("TextLabel",{Text="HV",Font=Enum.Font.GothamBold,TextSize=19,
+        TextColor3=Color3.fromRGB(242,246,255),Rotation=-45,BackgroundTransparency=1,Size=UDim2.fromScale(1,1),ZIndex=74},emblem)
+    label("HUSS VALLEY",37,25,83,510,45,nil,Enum.Font.GothamBold)
+    label("P R E P A R A N D O   S E U   P A I N E L",10,25,135,510,20,Color3.fromRGB(148,158,188))
+    local track=create("Frame",{Name="LoadingTrack",Position=UDim2.fromOffset(40,185),Size=UDim2.fromOffset(480,10),
+        BackgroundColor3=Color3.fromRGB(30,35,54),BorderSizePixel=0,ClipsDescendants=true,ZIndex=73},content);round(track,99)
+    local fill=create("Frame",{Name="LoadingFill",Size=UDim2.fromScale(0,1),BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=74},track);round(fill,99)
+    create("UIGradient",{Color=ColorSequence.new({ColorSequenceKeypoint.new(0,blue),ColorSequenceKeypoint.new(0.55,lavender),ColorSequenceKeypoint.new(1,coral)})},fill)
+    local shine=create("Frame",{Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=75},fill)
+    local shineGradient=create("UIGradient",{Offset=Vector2.new(-1,0),Rotation=20,
+        Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,1),NumberSequenceKeypoint.new(0.45,1),
+            NumberSequenceKeypoint.new(0.5,0.65),NumberSequenceKeypoint.new(0.55,1),NumberSequenceKeypoint.new(1,1)})},shine)
+    animate(shineGradient,{Offset=Vector2.new(1,0)},1.65,-1)
+    local status=label("Construindo a interface...",11,40,205,415,22,Color3.fromRGB(168,177,202))
+    status.TextXAlignment=Enum.TextXAlignment.Left
+    local percent=label("0%",11,455,205,65,22,blue,Enum.Font.GothamBold)
+    percent.TextXAlignment=Enum.TextXAlignment.Right
+    local avatar=create("ImageLabel",{Image="rbxthumb://type=AvatarHeadShot&id="..player.UserId.."&w=100&h=100",
+        Position=UDim2.fromOffset(178,257),Size=UDim2.fromOffset(27,27),BackgroundColor3=Color3.fromRGB(28,32,51),BorderSizePixel=0,ZIndex=74},content);round(avatar,99)
+    local welcome=label("Bem-vindo, "..player.DisplayName,11,213,258,300,25,Color3.fromRGB(196,202,221))
+    welcome.TextXAlignment=Enum.TextXAlignment.Left
+    label("v"..API.Version,9,40,289,480,15,Color3.fromRGB(99,111,143))
+    local amount=create("NumberValue",{Value=0},boot)
+    local changed=amount.Changed:Connect(function(value)
+        if not loading.active then return end
+        fill.Size=UDim2.fromScale(math.clamp(value,0,1),1)
+        percent.Text=string.format("%d%%",math.floor(value*100+0.5))
+    end)
+    local progressTween
+    bootProgress=function(value,message)
+        if not loading.active then return end
+        loading.target=math.max(loading.target,math.clamp(value,0,1))
+        if progressTween then progressTween:Cancel() end
+        progressTween=animate(amount,{Value=loading.target},0.32)
+        status.Text=message
+    end
+    function loading.Stop()
+        if not loading.active then return end
+        loading.active=false;changed:Disconnect()
+        for _,t in ipairs(loading.tweens) do t:Cancel() end
+        loading.tweens={};boot:Destroy()
+    end
+    function loading.Finish(callback)
+        bootProgress(1,"Tudo pronto. Vamos comecar.")
+        task.delay(math.max(0.38,1.35-(os.clock()-loading.started)),function()
+            if not loading.active or not state.alive then return end
+            amount.Value=1
+            animate(content,{GroupTransparency=1},0.3)
+            animate(boot,{BackgroundTransparency=1},0.3)
+            for _,object in ipairs(boot:GetDescendants()) do
+                if object:IsA("UIStroke") then animate(object,{Transparency=1},0.28)
+                elseif object:IsA("Frame") and not object:IsDescendantOf(content) then animate(object,{BackgroundTransparency=1},0.28) end
+            end
+            task.delay(0.32,function()
+                if not loading.active or not state.alive then return end
+                loading.Stop();state.booting=false;callback()
+            end)
+        end)
+    end
+    animate(content,{GroupTransparency=0},0.35)
+    bootProgress(0.06,"Iniciando seu painel...")
+end
 local visuals=create("Folder",{Name="HussValleyLocalVisuals"},workspace)
 local overlay=create("Frame",{Name="ESP",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},gui)
 local toast=text(gui,"",11,{Name="Notice",AnchorPoint=Vector2.new(1,1),Position=UDim2.new(1,-14,1,-18),
@@ -239,7 +336,8 @@ local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,36
     prediction={0,0.5},aimSmooth={1,25},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
-    shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85}}
+    shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85},
+    autoJumpInterval={0.1,1},freezeDuration={0.05,0.3},freezeCooldown={0.5,5}}
 local function valid(key,value)
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
     if type(value)=="number" then
@@ -289,7 +387,7 @@ end
 
 -- A compact sidebar and two columns follow the reference; the layout fits the viewport.
 local window=themed(create("Frame",{Name="Window",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.46),
-    Size=UDim2.fromOffset(730,438),BackgroundTransparency=1-cfg.opacity,BorderSizePixel=0,ClipsDescendants=true},gui),"BackgroundColor3","bg")
+    Size=UDim2.fromOffset(730,438),BackgroundTransparency=1-cfg.opacity,BorderSizePixel=0,ClipsDescendants=true,Visible=false},gui),"BackgroundColor3","bg")
 round(window,11)
 surface(window,0)
 local scale=create("UIScale",{Scale=1},window)
@@ -323,6 +421,7 @@ fit=function()
     -- Fit the size without changing either user-dragged position.
     scale.Scale=math.min(scale.Scale,(size.X-16)/730,(size.Y-24)/438)
     toast.Size=UDim2.fromOffset(math.min(300,math.max(120,size.X-28)),58)
+    if API.Loading then API.Loading.Fit(size) end
 end
 local show
 do
@@ -351,7 +450,7 @@ do
         activeTween:Play()
     end
     show=function(value)
-        if not state.alive then return end
+        if not state.alive or state.booting then return end
         state.visible=value;window.Visible=value;tooltip.Visible=false
         ui.UpdateFloating()
         if value then if refreshAccent then refreshAccent() end;applyAppearance() end
@@ -375,6 +474,7 @@ do
             end)
         end)
     end
+    ui.Draggable=draggable
     draggable(dragbar,window)
     draggable(floating,ui.FloatingHost,floatingDrag)
     listen(floating.Activated,function()
@@ -383,6 +483,121 @@ do
     listen(brand.Activated,function() show(false) end)
     listen(minimize.Activated,function() show(false) end)
     listen(close.Activated,function() show(false) end)
+end
+
+-- Optional draggable action buttons. Their menu toggles control their existence on screen.
+do
+    local quick={buttons={},jumping=false,freezeQueued=false,readyAt=0,generation=0,clock=0,lastJump=-math.huge}
+    API.QuickActions=quick
+    local function make(key,title,y)
+        local host=create("CanvasGroup",{Name=key.."Host",Position=UDim2.new(1,-184,y,0),
+            Size=UDim2.fromOffset(158,52),BackgroundTransparency=1,GroupTransparency=1,Visible=false,ZIndex=25},gui)
+        local hit=create("TextButton",{Name=key,Text="",Size=UDim2.new(1,-4,1,-4),Position=UDim2.fromOffset(2,2),
+            BackgroundColor3=colors.card,BackgroundTransparency=0.12,AutoButtonColor=false,BorderSizePixel=0,ZIndex=26},host)
+        round(hit,10)
+        local edge=create("UIStroke",{Color=accent,Thickness=1,Transparency=0.65},hit)
+        local titleLabel=text(hit,title,11,{Position=UDim2.fromOffset(12,6),Size=UDim2.new(1,-24,0,18),
+            Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Center,ZIndex=27},true)
+        local status=text(hit,"DESLIGADO",9,{Position=UDim2.fromOffset(8,26),Size=UDim2.new(1,-16,0,15),
+            TextXAlignment=Enum.TextXAlignment.Center,ZIndex=27},true)
+        local entry={host=host,hit=hit,title=titleLabel,status=status,edge=edge,drag={moved=false,suppressUntil=0}}
+        quick.buttons[key]=entry
+        API.UI.Draggable(hit,host,entry.drag)
+        return entry
+    end
+    local jump=make("AutoJump","AUTO JUMP",0.60)
+    local freeze=make("Freeze","FREEZE",0.42)
+    local function visibility(entry,wanted)
+        if entry.wanted==wanted then return end
+        entry.wanted=wanted
+        if entry.done then entry.done:Disconnect();entry.done=nil end
+        if entry.fade then entry.fade:Cancel();entry.fade=nil end
+        if wanted then entry.host.Visible=true end
+        if not entry.host.Visible then return end
+        entry.fade=tween(entry.host,{GroupTransparency=wanted and 0 or 1},0.18)
+        local current=entry.fade
+        entry.done=current.Completed:Connect(function()
+            if entry.fade~=current then return end
+            entry.done:Disconnect();entry.done=nil;entry.fade=nil
+            if state.alive and entry.host.Parent then entry.host.Visible=entry.wanted end
+        end)
+    end
+    function quick.Refresh()
+        if not state.alive then return end
+        local now=os.clock()
+        jump.status.Text=quick.jumping and "LIGADO" or "DESLIGADO"
+        jump.status.TextColor3=quick.jumping and Color3.fromRGB(130,231,177) or colors.muted
+        jump.hit.BackgroundColor3=quick.jumping and Color3.fromRGB(25,57,46) or colors.card
+        local remaining=math.max(0,quick.readyAt-now)
+        freeze.status.Text=quick.freezeQueued and "CONGELANDO..." or remaining>0 and ("COOLDOWN: "..math.ceil(remaining)) or "PRONTO"
+        freeze.status.TextColor3=(quick.freezeQueued or remaining>0) and Color3.fromRGB(246,191,128) or colors.muted
+        freeze.hit.BackgroundColor3=(quick.freezeQueued or remaining>0) and Color3.fromRGB(62,44,31) or colors.card
+        for _,entry in pairs(quick.buttons) do entry.edge.Color=accent;entry.title.TextColor3=colors.text end
+    end
+    function quick.Update()
+        if not cfg.autoJumpButton then quick.jumping=false end
+        if not cfg.freezeButton then quick.generation=quick.generation+1;quick.freezeQueued=false;quick.readyAt=0 end
+        visibility(jump,cfg.autoJumpButton and not state.booting)
+        visibility(freeze,cfg.freezeButton and not state.booting)
+        quick.Refresh()
+    end
+    function quick.Reset()
+        quick.jumping=false;quick.generation=quick.generation+1
+        quick.freezeQueued=false;quick.readyAt=0;quick.lastJump=-math.huge
+        quick.Refresh()
+    end
+    function quick.ToggleJump()
+        if not state.alive or state.booting or not cfg.autoJumpButton then return false end
+        quick.jumping=not quick.jumping;quick.Refresh();return true
+    end
+    function quick.FreezeNow()
+        if not state.alive or state.booting or not cfg.freezeButton or quick.freezeQueued or os.clock()<quick.readyAt then return false end
+        local char,hum=character()
+        if not hum or hum.Health<=0 then notify("Entre no jogo com um personagem vivo para usar Freeze.");return false end
+        quick.generation=quick.generation+1
+        local ticket=quick.generation
+        local duration=math.clamp(cfg.freezeDuration,0.05,0.3)
+        quick.freezeQueued=true;quick.Refresh()
+        -- Give the button feedback one frame, then stall this client for the bounded duration.
+        -- No anchoring, remote traffic, cooldown modification, or claim of protection from hits.
+        task.delay(0.035,function()
+            if not state.alive or not cfg.freezeButton or ticket~=quick.generation then return end
+            if player.Character~=char or hum.Health<=0 then quick.Reset();return end
+            local untilTime=os.clock()+duration
+            while os.clock()<untilTime do end
+            quick.freezeQueued=false;quick.readyAt=os.clock()+cfg.freezeCooldown;quick.Refresh()
+        end)
+        return true
+    end
+    for _,item in ipairs({{jump,quick.ToggleJump},{freeze,quick.FreezeNow}}) do
+        local entry,callback=item[1],item[2]
+        listen(entry.hit.Activated,function()
+            if not entry.drag.moved and os.clock()>=entry.drag.suppressUntil then callback() end
+        end)
+    end
+    function quick.Step(dt)
+        quick.clock=quick.clock+dt
+        if quick.clock>=0.1 then quick.clock=0;quick.Refresh() end
+        if not quick.jumping or not cfg.autoJumpButton or state.booting then return end
+        local _,hum,root=character()
+        if not hum or not root or hum.Health<=0 then quick.Reset();return end
+        if cfg.fly or root.Anchored or hum.Sit or hum.PlatformStand or Input:GetFocusedTextBox() then return end
+        local now=os.clock()
+        if now-quick.lastJump>=cfg.autoJumpInterval and hum.FloorMaterial~=Enum.Material.Air
+            and hum:GetStateEnabled(Enum.HumanoidStateType.Jumping) then
+            quick.lastJump=now;hum.Jump=true;hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+    function quick.Stop()
+        quick.Reset()
+        for _,entry in pairs(quick.buttons) do
+            if entry.done then entry.done:Disconnect() end
+            if entry.fade then entry.fade:Cancel() end
+        end
+    end
+    actions.autoJumpButton=quick.Update;actions.freezeButton=quick.Update
+    listen(player.CharacterRemoving,quick.Reset)
+    listen(player.CharacterAdded,quick.Reset)
 end
 
 -- Icons are made from GUI primitives, without fonts or remote image dependencies.
@@ -638,6 +853,7 @@ left,right=page("ESP",4)
 c=card(left,"Players","esp","Marcadores acompanham a posicao atual a cada quadro, depois da camera. Dados e limites do avatar usam cache.")
 for _,v in ipairs({{"Boxes","boxes"},{"Names","names"},{"Tracers","tracers"},{"Health","health"},{"Distance","distance"},
     {"Skeleton","skeleton"},{"Head Dot","headDot"},{"Health Text","healthText"}}) do checkbox(c,v[1],v[2]) end
+card(left,"ESP de times","espTeams","Mostra jogador e nome do time na cor da equipe. Substitui boxes, esqueleto e outros desenhos enquanto ligado. Usa Runner/Catcher quando o jogo publica papeis em vez de times.")
 c=card(left,"Roles & Threat",nil,"Cores por papel publicado pelo jogo: catcher em vermelho e runner em verde. Usa o time quando nao ha papel disponivel.")
 checkbox(c,"Cores por papel / time","roleColors");checkbox(c,"Ignorar mesmo time","teamFilter")
 c=card(left,"Appearance",nil);cycle(c,"Accent","accent",{"Peach","Purple","Blue","Pink","Green"})
@@ -657,6 +873,13 @@ local previewNote=text(previewOptions,"Seu avatar / preview local",9,{TextXAlign
 themed(previewNote,"TextColor3","muted");previewExpand()
 
 left,right=page("World",5)
+do
+    local content=card(left,"Auto Jump","autoJumpButton","Liga o botao flutuante. Toque nele para iniciar ou parar os saltos; arraste para reposicionar.")
+    slider(content,"Intervalo dos saltos","autoJumpInterval",0.1,1,0.05,"s")
+    content=card(left,"Freeze","freezeButton","Liga o botao flutuante para uma travada curta da tela/jogo e retorno automatico.")
+    slider(content,"Duracao da travada","freezeDuration",0.05,0.3,0.01,"s")
+    slider(content,"Intervalo entre usos","freezeCooldown",0.5,5,0.25,"s")
+end
 card(left,"Environment","fullbright","Iluminacao local mais clara.")
 c=card(left,"Teleport Walk","tpWalk","Deslocamento local adicional; nao garante ignorar validacao do servidor.")
 slider(c,"Speed","tpSpeed",1,80,1)
@@ -745,23 +968,81 @@ do
         listen(marker.Activated,function() if i==6 then API.MarkAbilityDiagnostics() elseif item[2] then API.MarkDiagnostics(item[2]) else API.StopHitDiagnostics(true) end end)
     end
 end
-local configs,configExpand=card(right,"Configs",nil,"Salva no executor quando ha acesso a arquivos; caso contrario, guarda apenas nesta sessao.")
+local configs,configExpand=card(right,"Configs",nil,"Salve com um nome. Selecione um perfil na lista e use Load para aplicar suas opcoes.")
 local configName=create("TextBox",{Name="ConfigName",Size=UDim2.new(1,0,0,27),Text="my-config",PlaceholderText="Config name",ClearTextOnFocus=false,
     BackgroundColor3=Color3.fromRGB(36,29,44),TextColor3=colors.text,TextSize=10,Font=Enum.Font.GothamMedium,BorderSizePixel=0},configs);round(configName,5)
 surface(configName,0)
+do
+    local ui={Rows={},Selected=nil,Names={}}
+    API.ConfigUI=ui
+    local selected=text(configs,"Selecionada: nenhuma",10,{Name="SelectedConfig",Size=UDim2.new(1,0,0,21)})
+    local list=create("ScrollingFrame",{Name="SavedConfigs",Size=UDim2.new(1,0,0,104),
+        BackgroundTransparency=0.5,BackgroundColor3=colors.bg,BorderSizePixel=0,ScrollBarThickness=3,
+        CanvasSize=UDim2.new(),ScrollingDirection=Enum.ScrollingDirection.Y},configs);round(list,5)
+    local empty=text(list,"Nenhuma configuracao salva.",10,{Name="EmptyConfigs",Size=UDim2.new(1,-12,0,35),
+        Position=UDim2.fromOffset(6,3),TextWrapped=true})
+    function ui.Paint()
+        list.BackgroundColor3=colors.bg;list.ScrollBarImageColor3=accent
+        for name,row in pairs(ui.Rows) do
+            local active=ui.Selected==name
+            row.button.BackgroundColor3=active and accent:Lerp(colors.card,0.78) or colors.card
+            row.button.TextColor3=active and accent or colors.text
+            row.edge.Color=accent;row.edge.Transparency=active and 0.25 or 1
+        end
+    end
+    function ui.Select(name)
+        ui.Selected=name;selected.Text="Selecionada: "..(name or "nenhuma")
+        if name then configName.Text=name end
+        ui.Paint()
+        if ui.AfterSelect then ui.AfterSelect(name) end
+    end
+    function ui.SetNames(names,preferred)
+        ui.Names=names
+        local found={}
+        for i,name in ipairs(names) do
+            found[name]=true
+            local row=ui.Rows[name]
+            if not row then
+                local b=create("TextButton",{Name="ConfigEntry",Text="  "..name,TextSize=10,
+                    Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Left,
+                    BackgroundColor3=colors.card,TextColor3=colors.text,AutoButtonColor=false,
+                    BorderSizePixel=0,Size=UDim2.new(1,-12,0,25)},list);round(b,4)
+                row={button=b,edge=create("UIStroke",{Color=accent,Thickness=1,Transparency=1},b)}
+                row.connection=b.Activated:Connect(function() ui.Select(name) end)
+                ui.Rows[name]=row
+            end
+            row.button.Position=UDim2.fromOffset(5,(i-1)*28+5)
+        end
+        for name,row in pairs(ui.Rows) do
+            if not found[name] then row.connection:Disconnect();row.button:Destroy();ui.Rows[name]=nil end
+        end
+        list.CanvasSize=UDim2.fromOffset(0,#names*28+10);empty.Visible=#names==0
+        ui.Select(found[preferred] and preferred or found[ui.Selected] and ui.Selected or names[1])
+    end
+    function ui.Stop() for _,row in pairs(ui.Rows) do row.connection:Disconnect() end end
+    accentRefreshers[#accentRefreshers+1]={pageOf(list),ui.Paint}
+end
 actionButton(configs,"Save Config",function() API.SaveConfig(configName.Text) end)
-actionButton(configs,"Load Config",function() API.LoadConfig(configName.Text) end)
-actionButton(configs,"Delete Config",function() API.DeleteConfig(configName.Text) end)
+actionButton(configs,"Load Config",function()
+    if not API.ConfigUI.Selected then notify("Selecione uma configuracao salva na lista.");return end
+    API.LoadConfig(API.ConfigUI.Selected)
+end)
+actionButton(configs,"Delete Config",function()
+    if not API.ConfigUI.Selected then notify("Selecione uma configuracao salva na lista.");return end
+    API.DeleteConfig(API.ConfigUI.Selected)
+end)
+actionButton(configs,"Atualizar lista",function() API.RefreshConfigs() end)
 checkbox(configs,"Auto-Load This Config On Launch","autoLoad");configExpand()
 local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / "..API.Version)
 actionButton(suite,"Rejoin Server",function() API.Rejoin() end)
 actionButton(suite,"Destroy Menu",function() API.Destroy() end)
 actionButton(suite,"Copiar diagnostico",function() API.ExportDiagnostics() end);suiteExpand()
-bootProgress(0.7,"Interface ready / connecting controls...")
+bootProgress(0.7,"Conectando controles e recursos...")
 
 -- Rainbow updates only accent colors on visible pages, never the full theme.
 refreshAccent=function()
     accent=cfg.rainbow and Color3.fromHSV((os.clock()*0.08)%1,0.45,1) or palette[cfg.accent]
+    if API.QuickActions then API.QuickActions.Refresh() end
     if not state.visible then return end
     for _,entry in ipairs(accentItems) do if entry[1].Parent and (not entry[3] or entry[3].Visible) then entry[1][entry[2]]=accent end end
     for _,entry in ipairs(accentRefreshers) do if not entry[1] or entry[1].Visible then entry[2]() end end
@@ -1239,6 +1520,12 @@ do
         local role=N.GameRole(p)
         return role and roleColors[role] or (p.Team and p.TeamColor.Color) or accent
     end
+    function N.ESPTeam(p)
+        if p.Team and p.Neutral~=true then return p.Team.Name,p.TeamColor.Color end
+        local role=N.GameRole(p)
+        if role then return role,roleColors[role] end
+        return "Sem time",colors.muted
+    end
     local function active(kind,requiredRole)
         if not state.alive then return end
         local char,hum,root=character();local role=N.GameRole(player)
@@ -1649,6 +1936,9 @@ local function recordFor(p)
     local box=create("Frame",{Name="Box",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},f)
     local stroke=create("UIStroke",{Color=accent,Thickness=1,Transparency=0.1},box)
     local name=text(f,"",10,{Name="Name",AnchorPoint=Vector2.new(0.5,1),Position=UDim2.fromScale(0.5,0),Size=UDim2.fromOffset(190,16),TextXAlignment=Enum.TextXAlignment.Center,TextStrokeTransparency=0.3},true)
+    local team=text(f,"",10,{Name="Team",AnchorPoint=Vector2.new(0.5,1),Position=UDim2.new(0.5,0,0,-17),
+        Size=UDim2.fromOffset(230,17),TextXAlignment=Enum.TextXAlignment.Center,Font=Enum.Font.GothamBold,
+        TextStrokeTransparency=0.15,Visible=false},true)
     local hp=create("Frame",{Name="Health",AnchorPoint=Vector2.new(1,1),Position=UDim2.new(0,-4,1,0),Size=UDim2.new(0,2,1,0),BackgroundColor3=Color3.fromRGB(112,226,151),BorderSizePixel=0},f)
     local detail=text(f,"",9,{Name="Distance",Position=UDim2.new(0,-30,1,2),Size=UDim2.new(1,60,0,15),TextXAlignment=Enum.TextXAlignment.Center,TextStrokeTransparency=0.3},true)
     local tracer=line(f,0,0,0,0,accent,1)
@@ -1656,7 +1946,7 @@ local function recordFor(p)
     local dot=create("Frame",{Name="HeadDot",AnchorPoint=Vector2.new(0.5,0.5),Size=UDim2.fromOffset(4,4),BackgroundColor3=accent,BorderSizePixel=0},f);round(dot,6)
     local highlight=create("Highlight",{Name="HVChams",Enabled=false,DepthMode=Enum.HighlightDepthMode.AlwaysOnTop,
         FillTransparency=0.7,OutlineTransparency=0.1,FillColor=accent,OutlineColor=accent},visuals)
-    r={frame=f,box=box,stroke=stroke,name=name,hp=hp,detail=detail,tracer=tracer,view=view,dot=dot,highlight=highlight,joints={},bones={}}
+    r={frame=f,box=box,stroke=stroke,name=name,team=team,hp=hp,detail=detail,tracer=tracer,view=view,dot=dot,highlight=highlight,joints={},bones={}}
     espRecords[p]=r;return r
 end
 local function moveLine(object,x1,y1,x2,y2)
@@ -1670,14 +1960,14 @@ local function setESPBounds(r,x,y,w,h)
 end
 local updateESP
 local function renderESP(dt)
-    if not (cfg.esp or cfg.chams or cfg.viewTracer) then return end
+    if not (cfg.esp or cfg.espTeams or cfg.chams or cfg.viewTracer) then return end
     state.espClock=(state.espClock or 0)+dt
     updateESP(false)
 end
 updateESP=function(forceData)
     local cam=workspace.CurrentCamera;local _,_,localRoot=character()
     if not cam or not localRoot then for p in pairs(espRecords) do clearRecord(p) end;return end
-    if not (cfg.esp or cfg.chams or cfg.viewTracer) then for p in pairs(espRecords) do clearRecord(p) end;return end
+    if not (cfg.esp or cfg.espTeams or cfg.chams or cfg.viewTracer) then for p in pairs(espRecords) do clearRecord(p) end;return end
     for _,p in ipairs(roster) do
         if p~=player then
             local a=actor(p);local ch,h,root=a.char,a.hum,a.root
@@ -1690,13 +1980,15 @@ updateESP=function(forceData)
                 local dataDue=forceData or r.dataCharacter~=ch or not r.nextData or now>=r.nextData
                 if dataDue then
                     r.color=cfg.roleColors and API.Native.ESPColor(p) or accent
+                    r.teamName,r.teamColor=API.Native.ESPTeam(p)
+                    if cfg.espTeams then r.color=r.teamColor end
                     r.dataCharacter=ch;r.nextData=now+1/cfg.espRate
                 end
                 local color=r.color or accent
                 writeChanged(r.highlight,"Enabled",cfg.chams);writeChanged(r.highlight,"Adornee",ch);writeChanged(r.highlight,"FillColor",color);writeChanged(r.highlight,"OutlineColor",color)
                 local center,on=cam:WorldToViewportPoint(root.Position)
-                writeChanged(r.frame,"Visible",on and (cfg.esp or cfg.viewTracer))
-                if on and (cfg.esp or cfg.viewTracer) then
+                writeChanged(r.frame,"Visible",on and (cfg.esp or cfg.espTeams or cfg.viewTracer))
+                if on and (cfg.esp or cfg.espTeams or cfg.viewTracer) then
                     dataDue=dataDue or r.boundsCharacter~=ch or not r.boundOffset
                     if dataDue then
                         local bounds,size=ch:GetBoundingBox();r.boundOffset=root.CFrame:ToObjectSpace(bounds);r.boundSize=size
@@ -1712,26 +2004,30 @@ updateESP=function(forceData)
                     end end end
                     if validBox then
                         setESPBounds(r,minX,minY,maxX-minX,maxY-minY)
-                        writeChanged(r.box,"Visible",cfg.esp and cfg.boxes);writeChanged(r.stroke,"Color",color)
-                        writeChanged(r.name,"Visible",cfg.esp and cfg.names)
-                        writeChanged(r.detail,"Visible",cfg.esp and (cfg.distance or cfg.healthText))
+                        local geometry=cfg.esp and not cfg.espTeams
+                        writeChanged(r.box,"Visible",geometry and cfg.boxes);writeChanged(r.stroke,"Color",color)
+                        writeChanged(r.name,"Visible",cfg.espTeams or cfg.esp and cfg.names)
+                        writeChanged(r.name,"TextColor3",cfg.espTeams and color or colors.text)
+                        writeChanged(r.team,"Visible",cfg.espTeams);writeChanged(r.team,"TextColor3",r.teamColor or color)
+                        writeChanged(r.detail,"Visible",geometry and (cfg.distance or cfg.healthText))
                         if dataDue then
                             writeChanged(r.name,"Text",p.DisplayName)
+                            writeChanged(r.team,"Text",r.teamName or "Sem time")
                             writeChanged(r.detail,"Text",(cfg.distance and string.format("%d studs",math.floor(dist)) or "")..(cfg.healthText and string.format("  %d HP",math.floor(h.Health)) or ""))
                         end
-                        writeChanged(r.hp,"Visible",cfg.esp and cfg.health)
+                        writeChanged(r.hp,"Visible",geometry and cfg.health)
                         local healthRatio=math.clamp(h.Health/math.max(1,h.MaxHealth),0,1)
                         if r.healthRatio~=healthRatio then r.healthRatio=healthRatio;r.hp.Size=UDim2.new(0,2,healthRatio,0) end
-                        writeChanged(r.tracer,"Visible",cfg.esp and cfg.tracers);writeChanged(r.tracer,"BackgroundColor3",color)
+                        writeChanged(r.tracer,"Visible",geometry and cfg.tracers);writeChanged(r.tracer,"BackgroundColor3",color)
                         if r.tracer.Visible then moveLine(r.tracer,cam.ViewportSize.X/2-minX,cam.ViewportSize.Y-minY,center.X-minX,maxY-minY) end
                         if not a.head or not a.head.Parent then a.head=ch:FindFirstChild("Head") end
                         local head=a.head or root;local start=cam:WorldToViewportPoint(head.Position)
                         local finish=cam:WorldToViewportPoint(head.Position+head.CFrame.LookVector*5)
                         writeChanged(r.view,"Visible",cfg.viewTracer and finish.Z>0);writeChanged(r.view,"BackgroundColor3",color)
                         if r.view.Visible then moveLine(r.view,start.X-minX,start.Y-minY,finish.X-minX,finish.Y-minY) end
-                        writeChanged(r.dot,"Visible",cfg.esp and cfg.headDot);writeChanged(r.dot,"BackgroundColor3",color)
+                        writeChanged(r.dot,"Visible",geometry and cfg.headDot);writeChanged(r.dot,"BackgroundColor3",color)
                         if r.dot.Visible then r.dot.Position=UDim2.fromOffset(start.X-minX,start.Y-minY) end
-                        if cfg.skeleton and cfg.esp then
+                        if cfg.skeleton and geometry then
                             if r.character~=ch then
                                 for _,b in ipairs(r.bones) do b:Destroy() end;r.joints={};r.bones={};r.character=ch
                                 for _,joint in ipairs(ch:GetDescendants()) do
@@ -1755,7 +2051,7 @@ updateESP=function(forceData)
     end
 end
 listen(Players.PlayerRemoving,clearRecord)
-for _,key in ipairs({"esp","chams","viewTracer","boxes","names","distance","health","healthText","tracers","headDot","skeleton","roleColors","teamFilter","espRange","espRate","smoothESP"}) do
+for _,key in ipairs({"esp","espTeams","chams","viewTracer","boxes","names","distance","health","healthText","tracers","headDot","skeleton","roleColors","teamFilter","espRange","espRate","smoothESP"}) do
     actions[key]=function() updateESP(true) end
 end
 local previewCharacter
@@ -1797,62 +2093,187 @@ function API.RefreshEmotes()
     end) end
 end
 
--- Named configurations: strict keys and bounded values; no arbitrary file paths.
-env.HussValleyConfigSession=env.HussValleyConfigSession or {}
-local session=env.HussValleyConfigSession
-local fileStore=type(writefile)=="function" and type(readfile)=="function" and type(isfile)=="function" and type(makefolder)=="function"
-local function safeName(name)
-    local result=tostring(name):gsub("[^%w_%-]",""):sub(1,40)
-    assert(#result>0,"Escolha um nome com letras ou numeros.");return result
-end
-local function path(name) return "HussValleyPanel/"..safeName(name)..".json" end
-local function configData() local data={};for k in pairs(defaults) do data[k]=cfg[k] end;return data end
-local function saveRecord(name,data)
-    session[name]=data
-    if fileStore then
-        local ok=pcall(function() if type(isfolder)~="function" or not isfolder("HussValleyPanel") then makefolder("HussValleyPanel") end;writefile(path(name),Http:JSONEncode(data)) end)
-        if not ok then notify("Acesso a arquivos falhou; configuracao mantida so nesta sessao.");return false end
+-- Named profiles have a persistent index, legacy-file discovery and a separate selected row.
+local loadRecord
+do
+    env.HussValleyConfigSession=type(env.HussValleyConfigSession)=="table" and env.HussValleyConfigSession or {}
+    local session=env.HussValleyConfigSession
+    env.HussValleyConfigVolatile=type(env.HussValleyConfigVolatile)=="table" and env.HussValleyConfigVolatile or {}
+    local volatile=env.HussValleyConfigVolatile
+    local fileStore=type(writefile)=="function" and type(readfile)=="function" and type(isfile)=="function"
+    local folder="HussValleyPanel"
+    local applying=false
+    local function safeName(name)
+        local result=tostring(name or ""):gsub("[^%w_%-]",""):sub(1,40)
+        assert(#result>0,"Escolha um nome com letras ou numeros.")
+        local lower=string.lower(result)
+        assert(lower~="_autoload" and lower~="_index","Este nome e reservado.")
+        return result
+    end
+    local function profileName(name)
+        return type(name)=="string" and #name>0 and #name<=40 and not name:find("[^%w_%-]")
+            and string.lower(name)~="_autoload" and string.lower(name)~="_index"
+    end
+    local function path(name) return folder.."/"..name..".json" end
+    local function saveRecord(name,data)
+        session[name]=data;volatile[name]=true
+        if not fileStore then return false end
+        local ok=pcall(function()
+            if type(makefolder)=="function" then pcall(makefolder,folder) end
+            local encoded=Http:JSONEncode(data)
+            writefile(path(name),encoded)
+            assert(isfile(path(name)) and readfile(path(name))==encoded,"A gravacao nao foi confirmada.")
+        end)
+        if ok then volatile[name]=nil end
+        return ok
+    end
+    loadRecord=function(name)
+        if volatile[name] then return type(session[name])=="table" and session[name] or nil end
+        if fileStore then
+            local ok,data=pcall(function()
+                if isfile(path(name)) then return Http:JSONDecode(readfile(path(name))) end
+            end)
+            if ok and type(data)=="table" then session[name]=data;return data end
+        end
+        return type(session[name])=="table" and session[name] or nil
+    end
+    local function isProfile(data)
+        if type(data)~="table" then return false end
+        for key in pairs(defaults) do if data[key]~=nil then return true end end
+        return false
+    end
+    local function packPosition(position)
+        return {position.X.Scale,position.X.Offset,position.Y.Scale,position.Y.Offset}
+    end
+    local function layoutData()
+        return {window=packPosition(window.Position),launcher=packPosition(API.UI.FloatingHost.Position),
+            autoJump=packPosition(API.QuickActions.buttons.AutoJump.host.Position),
+            freeze=packPosition(API.QuickActions.buttons.Freeze.host.Position)}
+    end
+    local function restoreLayout(layout)
+        if type(layout)~="table" then return end
+        for _,entry in ipairs({{"window",window},{"launcher",API.UI.FloatingHost},
+            {"autoJump",API.QuickActions.buttons.AutoJump.host},{"freeze",API.QuickActions.buttons.Freeze.host}}) do
+            local values=layout[entry[1]]
+            if type(values)=="table" then
+                local validPosition=true
+                for i=1,4 do local n=values[i]
+                    if type(n)~="number" or n~=n or math.abs(n)>10000000 then validPosition=false end
+                end
+                if validPosition then entry[2].Position=UDim2.new(values[1],values[2],values[3],values[4]) end
+            end
+        end
+    end
+    local function configData()
+        local data={_schema=2,_layout=layoutData()}
+        for key in pairs(defaults) do data[key]=cfg[key] end
+        return data
+    end
+    function API.ListConfigs()
+        local candidates={}
+        local index=loadRecord("_index")
+        if index and type(index.names)=="table" then
+            for _,name in ipairs(index.names) do if profileName(name) then candidates[name]=true end end
+        end
+        for name,data in pairs(session) do if profileName(name) and isProfile(data) then candidates[name]=true end end
+        if fileStore and type(listfiles)=="function" then
+            local ok,files=pcall(listfiles,folder)
+            if ok and type(files)=="table" then for _,file in ipairs(files) do
+                if type(file)=="string" then
+                    local normalized=file:gsub("\\","/")
+                    local name=normalized:match("([^/]+)%.json$")
+                    if profileName(name) then candidates[name]=true end
+                end
+            end end
+        end
+        local names={}
+        for name in pairs(candidates) do if isProfile(loadRecord(name)) then names[#names+1]=name end end
+        table.sort(names,function(a,b) local x,y=string.lower(a),string.lower(b);return x==y and a<b or x<y end)
+        return names
+    end
+    local function syncAutoLoad(name)
+        local record=loadRecord("_autoload")
+        cfg.autoLoad=record~=nil and record.enabled==true and record.name==name
+        for _,fn in ipairs(watchers.autoLoad or {}) do fn(cfg.autoLoad) end
+    end
+    API.ConfigUI.AfterSelect=syncAutoLoad
+    function API.RefreshConfigs(preferred)
+        local names=API.ListConfigs()
+        API.ConfigUI.SetNames(names,preferred or API.ConfigUI.Selected)
+        return names
+    end
+    function API.SaveConfig(name)
+        name=safeName(name);configName.Text=name
+        local persisted=saveRecord(name,configData())
+        local indexed=saveRecord("_index",{schema=2,names=API.ListConfigs()})
+        if cfg.autoLoad then saveRecord("_autoload",{name=name,enabled=true}) end
+        API.RefreshConfigs(name)
+        notify(persisted and indexed and ("Config salva: "..name) or ("Config disponivel nesta sessao: "..name))
+        return true,persisted and indexed
+    end
+    function API.LoadConfig(name,quiet)
+        name=safeName(name)
+        local data=loadRecord(name)
+        if not isProfile(data) then
+            if not quiet then notify("Config nao encontrada ou invalida: "..name) end
+            return false
+        end
+        local values={}
+        for key,initial in pairs(defaults) do
+            local candidate=data[key]
+            if key=="transparency" and candidate==nil and type(data.opacity)=="number" then candidate=(1-data.opacity)*100 end
+            local ok,value=valid(key,candidate)
+            if ok then values[key]=value else values[key]=initial end
+        end
+        -- Stop transient presses and drags; selecting a row alone never enters this path.
+        for input,pointer in pairs(pointerSessions) do
+            pointerSessions[input]=nil;if pointer.finish then pointer.finish(input) end
+        end
+        API.QuickActions.Reset()
+        applying=true
+        -- Parameters first, then disabled flags, then enabled flags.
+        for key,initial in pairs(defaults) do
+            if type(initial)~="boolean" and key~="opacity" then set(key,values[key],true) end
+        end
+        for _,enabled in ipairs({false,true}) do for key,initial in pairs(defaults) do
+            if type(initial)=="boolean" and key~="autoLoad" and values[key]==enabled then set(key,enabled,true) end
+        end end
+        applying=false
+        restoreLayout(data._layout)
+        API.RefreshConfigs(name);API.QuickActions.Update()
+        if not quiet then notify("Config carregada: "..name) end
         return true
     end
-    return false
-end
-local function loadRecord(name)
-    if fileStore then
-        local ok,result=pcall(function() if isfile(path(name)) then return Http:JSONDecode(readfile(path(name))) end end)
-        if ok and type(result)=="table" then return result end
+    function API.DeleteConfig(name)
+        name=safeName(name)
+        if fileStore then
+            local checked,exists=pcall(isfile,path(name))
+            if not checked then notify("Nao foi possivel conferir a configuracao salva.");return false end
+            if exists then
+                if type(delfile)~="function" then notify("Este executor nao permite excluir arquivos.");return false end
+                local removed=pcall(function() delfile(path(name));assert(not isfile(path(name))) end)
+                if not removed then notify("Nao foi possivel excluir; o perfil foi mantido na lista.");return false end
+            end
+        end
+        session[name]=nil;volatile[name]=nil
+        local auto=loadRecord("_autoload")
+        if auto and auto.name==name then saveRecord("_autoload",{enabled=false}) end
+        saveRecord("_index",{schema=2,names=API.ListConfigs()})
+        API.RefreshConfigs()
+        notify("Config removida: "..name);return true
     end
-    return session[name]
-end
-function API.SaveConfig(name)
-    name=safeName(name);assert(name~="_autoload","Este nome e reservado.");configName.Text=name
-    local persisted=saveRecord(name,configData())
-    saveRecord("_autoload",{name=name,enabled=cfg.autoLoad})
-    notify(persisted and "Config salva: "..name or "Config salva nesta sessao: "..name)
-end
-function API.LoadConfig(name,quiet)
-    name=safeName(name);assert(name~="_autoload","Este nome e reservado.");local data=loadRecord(name)
-    if not data then if not quiet then notify("Config nao encontrada: "..name) end;return false end
-    configName.Text=name
-    if data.transparency==nil and type(data.opacity)=="number" then data.transparency=math.clamp((1-data.opacity)*100,0,85) end
-    -- Apply non-booleans first so enabled features receive their configured values.
-    for _,booleans in ipairs({false,true}) do for key in pairs(defaults) do
-        if key~="opacity" and data[key]~=nil and (type(defaults[key])=="boolean")==booleans then set(key,data[key],true) end
-    end end
-    if not quiet then notify("Config carregada: "..name) end;return true
-end
-function API.DeleteConfig(name)
-    name=safeName(name);assert(name~="_autoload","Este nome e reservado.");session[name]=nil
-    if fileStore and isfile(path(name)) then
-        if type(delfile)~="function" then notify("Esta versao do executor nao permite apagar a config do disco.");return end
-        delfile(path(name))
+    actions.autoLoad=function(value)
+        if applying then return end
+        local name=API.ConfigUI.Selected
+        if value then
+            assert(name and isProfile(loadRecord(name)),"Salve e selecione uma configuracao primeiro.")
+            local durable=saveRecord("_autoload",{name=name,enabled=true})
+            if not durable then notify("Auto-load disponivel somente nesta sessao do executor.") end
+        else
+            local auto=loadRecord("_autoload")
+            if auto and (not name or auto.name==name) then saveRecord("_autoload",{enabled=false}) end
+        end
     end
-    local auto=loadRecord("_autoload");if auto and auto.name==name then saveRecord("_autoload",{enabled=false}) end
-    notify("Config removida: "..name)
-end
-actions.autoLoad=function(value)
-    local name=safeName(configName.Text)
-    assert(name~="_autoload","Este nome e reservado.")
-    saveRecord("_autoload",{name=name,enabled=value})
 end
 
 -- Diagnostic data stays local: only paths/classes and selected game-state attributes.
@@ -2542,6 +2963,7 @@ actions.radius=function() aimElapsed=1 end
 actions.teamCheck=function() aimElapsed=1 end
 listen(Run.Heartbeat,function(dt)
     if not state.alive then return end
+    API.QuickActions.Step(dt)
     elapsed=elapsed+dt;state.elapsed=elapsed;speedElapsed=speedElapsed+dt;promptElapsed=promptElapsed+dt;attackElapsed=attackElapsed+dt;gearElapsed=gearElapsed+dt;hueElapsed=hueElapsed+dt;aimElapsed=aimElapsed+dt
     local char,hum,root=character();local cam=workspace.CurrentCamera
     if speedElapsed>=0.1 then speedElapsed=0;applySpeed() end
@@ -2604,6 +3026,9 @@ function API.Destroy()
     if not state.alive then return end
     state.alive=false;perfToken=perfToken+1;xrayToken=xrayToken+1
     if API.UI then API.UI.Stop() end
+    if API.Loading then API.Loading.Stop() end
+    if API.QuickActions then API.QuickActions.Stop() end
+    if API.ConfigUI then API.ConfigUI.Stop() end
     for input in pairs(pointerSessions) do pointerSessions[input]=nil end
     if API.Shaders then API.Shaders.Stop() end
     endHitTrace("panelClosed",false)
@@ -2624,13 +3049,14 @@ fit();refreshTheme();selectPage("Combat")
 window.Visible=false
 task.defer(function()
     if not state.alive then return end
-    bootProgress(0.85,"Applying your settings...")
-    API.RefreshEmotes();local auto=loadRecord("_autoload")
+    bootProgress(0.85,"Carregando seus perfis...")
+    API.RefreshConfigs();API.RefreshEmotes();local auto=loadRecord("_autoload")
     if auto and auto.enabled and type(auto.name)=="string" then API.LoadConfig(auto.name,true) end
-    bootProgress(1,"Ready")
-    task.delay(0.18,function()
-        if state.alive then boot:Destroy();show(true);notify("Huss Valley / painel carregado. Integracoes pendentes estao identificadas nas opcoes.") end
+    API.Loading.Finish(function()
+        API.QuickActions.Update();show(true)
+        notify("Huss Valley / painel carregado.")
     end)
 end)
 return API
+
 

@@ -1,6 +1,26 @@
 # Huss Valley Panel
 
-Versão 0.5.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.0 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Carregamento, botões e perfis na versão 0.6.0
+
+A abertura usa uma tela escura em azul-marinho, detalhes em azul, lavanda e coral, monograma HV, avatar e saudação. A barra tem gradiente, brilho em movimento, porcentagem e mensagens das etapas de construção, conexão e leitura dos perfis. A entrada e a saída são suaves; a janela e os atalhos aguardam o fim dessa apresentação. O visual é feito com GUI nativa, sem tema de Halloween nem imagens externas de fundo. A apresentação dura pelo menos 1,35 segundo antes da transição de saída.
+
+Em **World > Auto Jump**, ligar a opção mostra um botão flutuante; tocar nesse botão inicia ou para os saltos. Desligar a opção esconde o botão e interrompe os saltos. O intervalo vai de 0,1 a 1 segundo. A rotina pede saltos quando o personagem está no chão, vivo, fora de um assento, sem estar ancorado e com o estado Jumping disponível; não altera JumpPower nem implementa salto no ar. Fly e campo de texto em foco suspendem novos pedidos. Morte, troca de personagem e carregamento de perfil interrompem a execução transitória.
+
+Em **World > Freeze**, ligar a opção mostra o segundo botão. Ele provoca uma pausa real e breve da execução local, de 0,05 a 0,30 segundo, começando em 0,12 segundo. A implementação ocupa intencionalmente o cliente somente durante esse intervalo limitado e volta automaticamente; não ancora o personagem, altera sua posição ou congela outros clientes. O intervalo entre usos é configurável de 0,5 a 5 segundos, começando em 1. O botão distingue pronto, congelamento e cooldown. Pedidos duplicados são recusados; desligar, renascer ou encerrar cancela um pedido que ainda não começou. Isso não implementa nem demonstra proteção contra hits.
+
+Os dois atalhos começam escondidos, podem ser arrastados livremente por mouse/toque e aparecem ou somem com fade. Arrastar não dispara sua ação. Suas posições, a posição da janela e a do botão de abertura fazem parte do perfil salvo.
+
+**ESP > ESP de times** fica junto das opções anteriores. Pode ser ativado sozinho e mostra o jogador e o nome do time com a cor da equipe. Quando o jogador é neutro ou não possui Team, usa Runner/Catcher publicado pelo jogo, ou “Sem time” se nenhum deles estiver disponível. Nesse modo, caixas, ossos, linhas comuns, barra de vida e ponto da cabeça ficam ocultos; ao desligá-lo, as preferências geométricas anteriores voltam sem serem sobrescritas. Chams e View Tracer continuam controles independentes. O movimento dos rótulos mantém a projeção por quadro da versão anterior.
+
+**Config > Configs** agora possui um campo de nome, lista rolável, seleção destacada, Save Config, Load Config, Delete Config e Atualizar lista. Selecionar uma linha não aplica o perfil: é preciso tocar em Load Config. Salvar inclui os valores e as opções atuais e seleciona o perfil na lista. Load e Delete usam a linha selecionada, mesmo que o campo de nome tenha sido editado para preparar uma cópia. Carregar um perfil antigo aplica os valores iniciais às opções novas que ele não contém; valores false são preservados e a opacidade antiga é migrada para transparência.
+
+Os JSONs continuam em `HussValleyPanel/`, com um índice `_index.json` para reconstruir a lista após outra execução. Quando listfiles está disponível, arquivos antigos ainda sem índice também são encontrados, inclusive com separadores de caminho Windows. Os nomes reservados de metadados não podem ser usados para perfis. Uma falha de gravação conserva a nova configuração na sessão e informa essa limitação; a gravação só é considerada persistente após leitura de confirmação. Falhas ao apagar mantêm o perfil na lista. Sem as APIs de arquivo, a lista dura somente na sessão do executor.
+
+Auto-Load aponta para um perfil salvo e selecionado. Selecionar ou carregar outro perfil não troca esse apontamento; excluir o perfil designado desativa o carregamento automático.
+
+A validação passou em 72 verificações de construção, abertura/limpeza, Auto Jump, Freeze limitado, cancelamento, perfis, persistência, falhas de arquivo, migração, seleção sem aplicação, layouts e ESP de times. Também passaram as 21 verificações anteriores de ponteiro/transições e as 68 de ESP por quadro, além da sintaxe do arquivo completo. São simulações das APIs; a aparência, a execução no Delta e o comportamento do servidor ainda precisam ser conferidos no Roblox.
 
 ## ESP e janela na versão 0.5.1
 
@@ -232,4 +252,5 @@ As opções começam desligadas. O ESP possui frequência de dados e distância 
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
 
 Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
+
 
