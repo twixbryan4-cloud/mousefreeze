@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.2
+-- Huss Valley Panel 0.6.3
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -46,7 +46,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.2", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.3", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -525,11 +525,17 @@ do
     function quick.Refresh()
         if not state.alive then return end
         local now=os.clock()
+        local remaining=math.max(0,math.ceil(quick.readyAt-now))
+        local style=quick.displayed
+        if style and style.jumping==quick.jumping and style.queued==quick.freezeQueued and style.remaining==remaining
+            and style.accent==accent and style.text==colors.text and style.card==colors.card and style.muted==colors.muted then return end
+        style=style or {};quick.displayed=style
+        style.jumping=quick.jumping;style.queued=quick.freezeQueued;style.remaining=remaining
+        style.accent=accent;style.text=colors.text;style.card=colors.card;style.muted=colors.muted
         jump.status.Text=quick.jumping and "LIGADO" or "DESLIGADO"
         jump.status.TextColor3=quick.jumping and Color3.fromRGB(130,231,177) or colors.muted
         jump.hit.BackgroundColor3=quick.jumping and Color3.fromRGB(25,57,46) or colors.card
-        local remaining=math.max(0,quick.readyAt-now)
-        freeze.status.Text=quick.freezeQueued and "CONGELANDO..." or remaining>0 and ("COOLDOWN: "..math.ceil(remaining)) or "PRONTO"
+        freeze.status.Text=quick.freezeQueued and "CONGELANDO..." or remaining>0 and ("COOLDOWN: "..remaining) or "PRONTO"
         freeze.status.TextColor3=(quick.freezeQueued or remaining>0) and Color3.fromRGB(246,191,128) or colors.muted
         freeze.hit.BackgroundColor3=(quick.freezeQueued or remaining>0) and Color3.fromRGB(62,44,31) or colors.card
         for _,entry in pairs(quick.buttons) do entry.edge.Color=accent;entry.title.TextColor3=colors.text end
@@ -576,6 +582,7 @@ do
         end)
     end
     function quick.Step(dt)
+        if not cfg.autoJumpButton and not cfg.freezeButton and not quick.jumping and not quick.freezeQueued then return end
         quick.clock=quick.clock+dt
         if quick.clock>=0.1 then quick.clock=0;quick.Refresh() end
         if not quick.jumping or not cfg.autoJumpButton or state.booting then return end
@@ -1395,12 +1402,13 @@ local function sameTeam(p)
 end
 local function nearest(radius)
     local _,_,root=character();if not root then return end
+    local origin=root.Position
     local target,best
     best=radius*radius
     for _,p in ipairs(roster) do
         if p~=player and not (cfg.teamCheck and sameTeam(p)) then
             local a=actor(p);local h,r=a.hum,a.root
-            if h and r and h.Health>0 then local delta=r.Position-root.Position;local d=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z;if d<=best then best=d;target=r end end
+            if h and r and h.Health>0 then local delta=r.Position-origin;local d=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z;if d<=best then best=d;target=r end end
         end
     end
     return target,math.sqrt(best)
@@ -1430,18 +1438,24 @@ listen(workspace.DescendantRemoving,function(o) prompts[o]=nil end)
 local function processPrompts()
     if not cfg.autoRevive and not cfg.autoPick then return end
     local _,_,root=character();if not root then return end
+    local origin=root.Position
     for prompt in pairs(prompts) do
         if prompt.Parent and prompt.Enabled then
-            local label=string.lower(prompt.ActionText.." "..prompt.ObjectText.." "..prompt.Name)
-            local wanted=(cfg.autoRevive and label:find("reviv",1,true)) or
-                (cfg.autoPick and (label:find("pick",1,true) or label:find("collect",1,true) or label:find("colet",1,true)))
             local parent=prompt.Parent;local pos
             if parent:IsA("Attachment") then pos=parent.WorldPosition elseif parent:IsA("BasePart") then pos=parent.Position
             elseif parent:IsA("Model") then pos=parent:GetPivot().Position end
-            if wanted and pos and (pos-root.Position).Magnitude<=prompt.MaxActivationDistance then
-                local ok=pcall(fireproximityprompt,prompt)
-                if not ok then set("autoPick",false);set("autoRevive",false);notify("O executor nao conseguiu acionar esse prompt.") end
-                return ok
+            if pos then
+                local delta=pos-origin;local range=prompt.MaxActivationDistance
+                if range>=0 and delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z<=range*range then
+                    local label=string.lower(prompt.ActionText.." "..prompt.ObjectText.." "..prompt.Name)
+                    local wanted=(cfg.autoRevive and label:find("reviv",1,true)) or
+                        (cfg.autoPick and (label:find("pick",1,true) or label:find("collect",1,true) or label:find("colet",1,true)))
+                    if wanted then
+                        local ok=pcall(fireproximityprompt,prompt)
+                        if not ok then set("autoPick",false);set("autoRevive",false);notify("O executor nao conseguiu acionar esse prompt.") end
+                        return ok
+                    end
+                end
             end
         end
     end
@@ -1465,7 +1479,13 @@ local function stepAdapters(dt)
             adapterTimers[key]=(adapterTimers[key] or 0)+dt
             local callback=adapters[name]
             local perFrame=API.Native and API.Native.ProximityAdapters[name]==callback
-            if perFrame or adapterTimers[key]>=0.25 then
+            local ready=true
+            if perFrame and API.Native.ProximityReady[name] then
+                local ok,result=pcall(API.Native.ProximityReady[name])
+                ready=ok and result~=nil and result~=false
+                if not ok then set(key,false,true);notify("Integracao interrompida: "..name);warn("[HV] "..tostring(result)) end
+            end
+            if ready and (perFrame or adapterTimers[key]>=0.25) then
                 local delta=adapterTimers[key];adapterTimers[key]=0;state.pending[key]=true
                 task.spawn(function()
                     if not state.alive or not cfg[key] or adapters[name]~=callback then state.pending[key]=nil;return end
@@ -1488,7 +1508,7 @@ for key,name in pairs(requiresAdapter) do actions[key]=function(v)
 end end
 -- Native commands transcribed from the user's runtime trace, never enabled by default.
 do
-    local N={Status={},Mapped={},ProximityAdapters={}}
+    local N={Status={},Mapped={},ProximityAdapters={},ProximityReady={}}
     API.Native=N
     local paths={melee="ChickenOrHero.Game.MeleeEvent",tackle="ChickenOrHero.Game.GameAction",
         ability="ChickenOrHero.Gear.GearEvent",dash="ChickenOrHero.Presentation.BoostRequest",replay="ChickenOrHero.Game.HitReplayEvent"}
@@ -1496,7 +1516,9 @@ do
     local roleColors={Catcher=Color3.fromRGB(244,115,125),Runner=Color3.fromRGB(110,212,172)}
     local function finite(value) return type(value)=="number" and value==value and math.abs(value)~=math.huge end
     local function status(kind,message)
-        local row=N.Status[kind] or {sent=0,accepted=0,rejected=0,timeouts=0,failed=0};N.Status[kind]=row;row.message=message
+        local row=N.Status[kind]
+        if row and row.message==message then return row end
+        row=row or {sent=0,accepted=0,rejected=0,timeouts=0,failed=0};N.Status[kind]=row;row.message=message
         local label=API.NativeStatusLabels[kind]
         if state.alive and label and label.Text~=message then label.Text=message end
         return row
@@ -1541,13 +1563,16 @@ do
     end
     local function opponent(root,radius,role)
         local target,best=nil,radius*radius
+        local origin=root.Position
         for _,p in ipairs(roster) do
-            local run,targetRole=p:GetAttribute("RunState"),N.GameRole(p)
-            if p~=player and targetRole~=role and targetRole~=nil and (run==nil or run=="Active") then
-                local a=actor(p)
-                if a.hum and a.root and a.hum.Health>0 then
-                    local delta=a.root.Position-root.Position;local distance=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z
-                    if distance<=best then best=distance;target=a.root end
+            if p~=player then
+                local run,targetRole=p:GetAttribute("RunState"),N.GameRole(p)
+                if targetRole~=role and targetRole~=nil and (run==nil or run=="Active") then
+                    local a=actor(p)
+                    if a.hum and a.root and a.hum.Health>0 then
+                        local delta=a.root.Position-origin;local distance=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z
+                        if distance<=best then best=distance;target=a.root end
+                    end
                 end
             end
         end
@@ -1604,23 +1629,32 @@ do
         local id=Http:GenerateGUID(false)
         return send("attack",r,id,{id=id,direction=direction,at=now,position=root.Position})
     end
+    local function readyTackle()
+        local _,_,root,role=active("tackle","Catcher");if not root then return end
+        local r,now=remote("tackle"),clock();if not r or not now or not available("tackle",now,"TackleReadyAt") then return end
+        local target=opponent(root,cfg.tackleRange,role);if not target then status("tackle","Nenhum runner ativo no alcance");return end
+        return root,r,now,target
+    end
     function N.Tackle()
-        local _,_,root,role=active("tackle","Catcher");if not root then return false end
-        local r,now=remote("tackle"),clock();if not r or not now or not available("tackle",now,"TackleReadyAt") then return false end
-        local target=opponent(root,cfg.tackleRange,role);if not target then status("tackle","Nenhum runner ativo no alcance");return false end
+        local root,r,now,target=readyTackle();if not root then return false end
         local direction=flatUnit(target.Position-root.Position) or flatUnit(root.CFrame.LookVector);if not direction then return false end
         local velocity=root.AssemblyLinearVelocity;local speed=Vector3.new(velocity.X,0,velocity.Z).Magnitude
         if not finite(speed) then return false end
         local id=Http:GenerateGUID(false)
         return send("tackle",r,id,"Tackle",{id=id,at=now,direction=direction,position=root.Position,speed=speed})
     end
-    function N.UseAbility()
-        local _,_,root,role=active("ability");if not root then return false end
-        local r,now=remote("ability"),clock();if not r or not now or not available("ability",now,"AbilityReadyAt") then return false end
-        for _,attribute in ipairs({"GhostAbilityReadyAt","CloneAbilityReadyAt","TruckAbilityReadyAt"}) do
-            local value=player:GetAttribute(attribute);if finite(value) and value>now then status("ability","Aguardando disponibilidade do jogo");return false end
+    local abilityAttributes={"GhostAbilityReadyAt","CloneAbilityReadyAt","TruckAbilityReadyAt"}
+    local function readyAbility()
+        local _,_,root,role=active("ability");if not root then return end
+        local r,now=remote("ability"),clock();if not r or not now or not available("ability",now,"AbilityReadyAt") then return end
+        for _,attribute in ipairs(abilityAttributes) do
+            local value=player:GetAttribute(attribute);if finite(value) and value>now then status("ability","Aguardando disponibilidade do jogo");return end
         end
-        local target=opponent(root,cfg.abilityRange,role);if not target then status("ability","Nenhum oponente ativo por perto");return false end
+        local target=opponent(root,cfg.abilityRange,role);if not target then status("ability","Nenhum oponente ativo por perto");return end
+        return root,r,now,target
+    end
+    function N.UseAbility()
+        local root,r,now,target=readyAbility();if not root then return false end
         local direction=flatUnit(target.Position-root.Position) or flatUnit(root.CFrame.LookVector);if not direction then return false end
         local id=Http:GenerateGUID(false)
         return send("ability",r,id,"UseAbility",nil,direction,id,nil,nil)
@@ -1706,19 +1740,23 @@ do
         end)
         return true,"Tecla "..cfg.dashKey
     end
-    function N.Dash(test)
-        if not state.alive or game.GameId~=10764627709 then return false end
+    local function readyDash(test)
+        if not state.alive or game.GameId~=10764627709 then return end
         local char,hum,root,role
         if test==true then
             char,hum,root=character()
-            if not char or not hum or not root or hum.Health<=0 then return false end
+            if not char or not hum or not root or hum.Health<=0 then return end
         else
-            char,hum,root,role=active("dash");if not char then return false end
+            char,hum,root,role=active("dash");if not char then return end
         end
-        if Input:GetFocusedTextBox() then status("dash","Aguardando fechar o campo de texto");return false end
-        if test~=true and not opponent(root,cfg.dashRange,role) then status("dash","Nenhum oponente no alcance");return false end
-        if char:GetAttribute("DashReady")==false then status("dash","Aguardando dash disponivel");return false end
-        if os.clock()-(lastAttempt.dash or -math.huge)<cfg.dashDelay then status("dash","Aguardando delay configurado");return false end
+        if Input:GetFocusedTextBox() then status("dash","Aguardando fechar o campo de texto");return end
+        if char:GetAttribute("DashReady")==false then status("dash","Aguardando dash disponivel");return end
+        if os.clock()-(lastAttempt.dash or -math.huge)<cfg.dashDelay then status("dash","Aguardando delay configurado");return end
+        if test~=true and not opponent(root,cfg.dashRange,role) then status("dash","Nenhum oponente no alcance");return end
+        return char
+    end
+    function N.Dash(test)
+        local char=readyDash(test);if not char then return false end
         local before=char:GetAttribute("DashCount")
         local fired,source=activateDashButton()
         if not fired then fired,source=pressDashKey() end
@@ -1887,18 +1925,18 @@ do
     local function perform(ctx,kind,fn)
         if ctx.Enabled then if not ctx.IsActive or ctx.IsActive() then fn() end else cancel(kind) end
     end
-    local function installProximity(name,kind,fn)
+    local function installProximity(name,kind,fn,ready)
         if remote(kind) and type(adapters[name])~="function" then
             local callback=function(ctx) perform(ctx,kind,fn) end
-            adapters[name]=callback;N.ProximityAdapters[name]=callback
+            adapters[name]=callback;N.ProximityAdapters[name]=callback;N.ProximityReady[name]=ready
         end
     end
     local function install()
         if type(adapters.AutoZone)~="function" then adapters.AutoZone=N.AutoZone end
         N.Mapped.zone=type(adapters.AutoZone)=="function"
-        installProximity("AutoDash","dash",N.Dash)
-        installProximity("AutoTackle","tackle",N.Tackle)
-        installProximity("AutoAbility","ability",N.UseAbility)
+        installProximity("AutoDash","dash",N.Dash,readyDash)
+        installProximity("AutoTackle","tackle",N.Tackle,readyTackle)
+        installProximity("AutoAbility","ability",N.UseAbility,readyAbility)
         N.Mapped.attack=remote("melee")~=nil;N.Mapped.dash=remote("dash")~=nil;N.Mapped.tackle=remote("tackle")~=nil;N.Mapped.ability=remote("ability")~=nil
         bind("melee",function(id,accepted,data) acknowledge("attack",id,accepted,data) end)
         bind("tackle",function(action,id,accepted,data) if action=="TackleResult" then acknowledge("tackle",id,accepted,data) end end)
@@ -1951,23 +1989,25 @@ do
                 if bodyNames[part.Name] and part:IsA("BasePart") then record.bodyParts[#record.bodyParts+1]=part end
             end
         end
+        local rootCF=root.CFrame
+        local inverse=rootCF:Inverse()
         local minX,minY,minZ,maxX,maxY,maxZ=math.huge,math.huge,math.huge,-math.huge,-math.huge,-math.huge
         local count=0
         for _,part in ipairs(record.bodyParts) do
             if part.Parent==char then
-                local relative=root.CFrame:ToObjectSpace(part.CFrame)
-                local pos,half=relative.Position,part.Size*0.5
+                local relative=inverse*part.CFrame
+                local pos,size=relative.Position,part.Size
+                local halfX,halfY,halfZ=size.X*0.5,size.Y*0.5,size.Z*0.5
                 local right,up,look=relative.RightVector,relative.UpVector,relative.LookVector
-                local x=math.abs(right.X)*half.X+math.abs(up.X)*half.Y+math.abs(look.X)*half.Z
-                local y=math.abs(right.Y)*half.X+math.abs(up.Y)*half.Y+math.abs(look.Y)*half.Z
-                local z=math.abs(right.Z)*half.X+math.abs(up.Z)*half.Y+math.abs(look.Z)*half.Z
+                local x=math.abs(right.X)*halfX+math.abs(up.X)*halfY+math.abs(look.X)*halfZ
+                local y=math.abs(right.Y)*halfX+math.abs(up.Y)*halfY+math.abs(look.Y)*halfZ
+                local z=math.abs(right.Z)*halfX+math.abs(up.Z)*halfY+math.abs(look.Z)*halfZ
                 minX=math.min(minX,pos.X-x);minY=math.min(minY,pos.Y-y);minZ=math.min(minZ,pos.Z-z)
                 maxX=math.max(maxX,pos.X+x);maxY=math.max(maxY,pos.Y+y);maxZ=math.max(maxZ,pos.Z+z);count=count+1
             end
         end
-        if count==0 then return root.CFrame,root.Size end
-        local center=Vector3.new((minX+maxX)/2,(minY+maxY)/2,(minZ+maxZ)/2)
-        return root.CFrame*CFrame.new(center),Vector3.new(maxX-minX,maxY-minY,maxZ-minZ)
+        if count==0 then return rootCF,root.Size end
+        return rootCF*CFrame.new((minX+maxX)/2,(minY+maxY)/2,(minZ+maxZ)/2),Vector3.new(maxX-minX,maxY-minY,maxZ-minZ)
     end
     function geometry.ProjectBounds(cam,cf,size)
         local minX,minY,maxX,maxY=math.huge,math.huge,-math.huge,-math.huge
@@ -2008,14 +2048,25 @@ local function recordFor(p)
     r={frame=f,box=box,stroke=stroke,name=name,team=team,hp=hp,detail=detail,tracer=tracer,view=view,dot=dot,highlight=highlight,joints={},bones={}}
     espRecords[p]=r;return r
 end
+local espLineCache=setmetatable({},{__mode="k"})
 local function moveLine(object,x1,y1,x2,y2)
+    local cached=espLineCache[object]
+    if cached and cached[1]==x1 and cached[2]==y1 and cached[3]==x2 and cached[4]==y2 then return end
+    cached=cached or {};espLineCache[object]=cached
+    cached[1]=x1;cached[2]=y1;cached[3]=x2;cached[4]=y2
     local dx,dy=x2-x1,y2-y1;object.Position=UDim2.fromOffset((x1+x2)/2,(y1+y2)/2)
     object.Size=UDim2.fromOffset(math.sqrt(dx*dx+dy*dy),1);object.Rotation=math.deg(math.atan2(dy,dx))
 end
 local function writeChanged(object,property,value) if object[property]~=value then object[property]=value end end
 local function setESPBounds(r,x,y,w,h)
-    writeChanged(r.frame,"Position",UDim2.fromOffset(x,y))
-    writeChanged(r.frame,"Size",UDim2.fromOffset(w,h))
+    if r.x~=x or r.y~=y then r.x=x;r.y=y;r.frame.Position=UDim2.fromOffset(x,y) end
+    if r.width~=w or r.height~=h then r.width=w;r.height=h;r.frame.Size=UDim2.fromOffset(w,h) end
+end
+local function projectESPPart(r,cam,part)
+    local cached=r.projected[part]
+    if not cached then cached={};r.projected[part]=cached end
+    if cached.frame~=r.projectionFrame then cached.frame=r.projectionFrame;cached.point=cam:WorldToViewportPoint(part.Position) end
+    return cached.point
 end
 local updateESP
 local function renderESP(dt)
@@ -2027,55 +2078,82 @@ updateESP=function(forceData)
     local cam=workspace.CurrentCamera;local _,_,localRoot=character()
     if not cam or not localRoot then for p in pairs(espRecords) do clearRecord(p) end;return end
     if not (cfg.esp or cfg.espTeams or cfg.chams or cfg.viewTracer) then for p in pairs(espRecords) do clearRecord(p) end;return end
+    local draw2D=cfg.esp or cfg.espTeams or cfg.viewTracer
+    local geometry=cfg.esp and not cfg.espTeams
+    local origin,rangeSquared,now=localRoot.Position,cfg.espRange*cfg.espRange,state.espClock or 0
+    local near=math.abs(cam.NearPlaneZ)
     for _,p in ipairs(roster) do
         if p~=player then
             local a=actor(p);local ch,h,root=a.char,a.hum,a.root
-            local dist=root and (root.Position-localRoot.Position).Magnitude or math.huge
-            local eligible=root and h and h.Health>0 and dist<=cfg.espRange and not(cfg.teamFilter and sameTeam(p))
+            local distanceSquared=math.huge
+            if root then local delta=root.Position-origin;distanceSquared=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z end
+            local eligible=root and h and h.Health>0 and distanceSquared<=rangeSquared and not(cfg.teamFilter and sameTeam(p))
             if not eligible then clearRecord(p)
             else
                 local r=recordFor(p)
-                local now=state.espClock or 0
                 local dataDue=forceData or r.dataCharacter~=ch or not r.nextData or now>=r.nextData
                 if dataDue then
                     r.color=cfg.roleColors and API.Native.ESPColor(p) or accent
                     r.teamName,r.teamColor=API.Native.ESPTeam(p)
                     if cfg.espTeams then r.color=r.teamColor end
                     r.dataCharacter=ch;r.nextData=now+1/cfg.espRate
-                end
-                local color=r.color or accent
-                writeChanged(r.highlight,"Enabled",cfg.chams);writeChanged(r.highlight,"Adornee",ch);writeChanged(r.highlight,"FillColor",color);writeChanged(r.highlight,"OutlineColor",color)
-                local center,on=cam:WorldToViewportPoint(root.Position)
-                writeChanged(r.frame,"Visible",on and (cfg.esp or cfg.espTeams or cfg.viewTracer))
-                if on and (cfg.esp or cfg.espTeams or cfg.viewTracer) then
-                    local cf,size=API.ESPGeometry.BodyBounds(r,ch,root,dataDue)
-                    local minX,minY,width,height=API.ESPGeometry.ProjectBounds(cam,cf,size)
-                    if minX then
-                        setESPBounds(r,minX,minY,width,height)
-                        local geometry=cfg.esp and not cfg.espTeams
+                    local color=r.color or accent
+                    writeChanged(r.highlight,"Enabled",cfg.chams);writeChanged(r.highlight,"Adornee",ch)
+                    writeChanged(r.highlight,"FillColor",color);writeChanged(r.highlight,"OutlineColor",color)
+                    if draw2D then
                         writeChanged(r.box,"Visible",geometry and cfg.boxes);writeChanged(r.stroke,"Color",color)
                         writeChanged(r.name,"Visible",cfg.espTeams or cfg.esp and cfg.names)
                         writeChanged(r.name,"TextColor3",cfg.espTeams and color or colors.text)
                         writeChanged(r.team,"Visible",cfg.espTeams);writeChanged(r.team,"TextColor3",r.teamColor or color)
                         writeChanged(r.detail,"Visible",geometry and (cfg.distance or cfg.healthText))
-                        if dataDue then
-                            writeChanged(r.name,"Text",p.DisplayName)
-                            writeChanged(r.team,"Text",r.teamName or "Sem time")
-                            writeChanged(r.detail,"Text",(cfg.distance and string.format("%d studs",math.floor(dist)) or "")..(cfg.healthText and string.format("  %d HP",math.floor(h.Health)) or ""))
+                        if r.name.Visible then writeChanged(r.name,"Text",p.DisplayName) end
+                        if cfg.espTeams then writeChanged(r.team,"Text",r.teamName or "Sem time") end
+                        if r.detail.Visible then
+                            writeChanged(r.detail,"Text",(cfg.distance and string.format("%d studs",math.floor(math.sqrt(distanceSquared))) or "")..(cfg.healthText and string.format("  %d HP",math.floor(h.Health)) or ""))
                         end
                         writeChanged(r.hp,"Visible",geometry and cfg.health)
-                        local healthRatio=math.clamp(h.Health/math.max(1,h.MaxHealth),0,1)
-                        if r.healthRatio~=healthRatio then r.healthRatio=healthRatio;r.hp.Size=UDim2.new(0,2,healthRatio,0) end
                         writeChanged(r.tracer,"Visible",geometry and cfg.tracers);writeChanged(r.tracer,"BackgroundColor3",color)
+                        writeChanged(r.view,"BackgroundColor3",color);writeChanged(r.dot,"BackgroundColor3",color)
+                    end
+                end
+                if not draw2D then writeChanged(r.frame,"Visible",false)
+                else
+                    local center,on=cam:WorldToViewportPoint(root.Position)
+                    local minX,minY,width,height
+                    if on then
+                        local cf,size=API.ESPGeometry.BodyBounds(r,ch,root,dataDue)
+                        minX,minY,width,height=API.ESPGeometry.ProjectBounds(cam,cf,size)
+                    end
+                    writeChanged(r.frame,"Visible",minX~=nil)
+                    if minX then
+                        setESPBounds(r,minX,minY,width,height)
+                        if r.projectedCharacter~=ch then r.projectedCharacter=ch;r.projected={} end
+                        r.projectionFrame=(r.projectionFrame or 0)+1
+                        local rootProjection=r.projected[root]
+                        if not rootProjection then rootProjection={};r.projected[root]=rootProjection end
+                        rootProjection.frame=r.projectionFrame;rootProjection.point=center
+                        if r.hp.Visible then
+                            local healthRatio=math.clamp(h.Health/math.max(1,h.MaxHealth),0,1)
+                            if r.healthRatio~=healthRatio then r.healthRatio=healthRatio;r.hp.Size=UDim2.new(0,2,healthRatio,0) end
+                        end
+                        local color=r.color or accent
                         if r.tracer.Visible then moveLine(r.tracer,cam.ViewportSize.X/2-minX,cam.ViewportSize.Y-minY,center.X-minX,height) end
-                        if not a.head or not a.head.Parent then a.head=ch:FindFirstChild("Head") end
-                        local head=a.head or root;local start=cam:WorldToViewportPoint(head.Position)
-                        local finish=cam:WorldToViewportPoint(head.Position+head.CFrame.LookVector*5)
-                        writeChanged(r.view,"Visible",cfg.viewTracer and start.Z>math.abs(cam.NearPlaneZ) and finish.Z>math.abs(cam.NearPlaneZ));writeChanged(r.view,"BackgroundColor3",color)
+                        local start,finish
+                        if cfg.viewTracer or (geometry and cfg.headDot) then
+                            if not a.head or not a.head.Parent then a.head=ch:FindFirstChild("Head") end
+                            local head=a.head or root;start=projectESPPart(r,cam,head)
+                            if cfg.viewTracer then finish=cam:WorldToViewportPoint(head.Position+head.CFrame.LookVector*5) end
+                        end
+                        writeChanged(r.view,"Visible",cfg.viewTracer and start.Z>near and finish.Z>near)
                         if r.view.Visible then moveLine(r.view,start.X-minX,start.Y-minY,finish.X-minX,finish.Y-minY) end
-                        writeChanged(r.dot,"Visible",geometry and cfg.headDot and start.Z>math.abs(cam.NearPlaneZ));writeChanged(r.dot,"BackgroundColor3",color)
-                        if r.dot.Visible then r.dot.Position=UDim2.fromOffset(start.X-minX,start.Y-minY) end
+                        writeChanged(r.dot,"Visible",geometry and cfg.headDot and start.Z>near)
+                        if r.dot.Visible then
+                            if r.dotX~=start.X-minX or r.dotY~=start.Y-minY then
+                                r.dotX=start.X-minX;r.dotY=start.Y-minY;r.dot.Position=UDim2.fromOffset(r.dotX,r.dotY)
+                            end
+                        end
                         if cfg.skeleton and geometry then
+                            local boneColorChanged=r.boneColor~=color;r.boneColor=color
                             if r.character~=ch then
                                 for _,b in ipairs(r.bones) do b:Destroy() end;r.joints={};r.bones={};r.character=ch
                                 for _,joint in ipairs(ch:GetDescendants()) do
@@ -2085,15 +2163,17 @@ updateESP=function(forceData)
                                 end
                             end
                             for i,joint in ipairs(r.joints) do
-                                local b=r.bones[i];b.Visible=false
+                                local b=r.bones[i];local visible=false
                                 if joint.Part0 and joint.Part1 then
-                                    local a=cam:WorldToViewportPoint(joint.Part0.Position);local v=cam:WorldToViewportPoint(joint.Part1.Position)
-                                    b.Visible=a.Z>math.abs(cam.NearPlaneZ) and v.Z>math.abs(cam.NearPlaneZ);b.BackgroundColor3=color
-                                    if b.Visible then moveLine(b,a.X-minX,a.Y-minY,v.X-minX,v.Y-minY) end
+                                    local first=projectESPPart(r,cam,joint.Part0);local last=projectESPPart(r,cam,joint.Part1)
+                                    visible=first.Z>near and last.Z>near
+                                    if visible then moveLine(b,first.X-minX,first.Y-minY,last.X-minX,last.Y-minY) end
                                 end
+                                writeChanged(b,"Visible",visible)
+                                if boneColorChanged then writeChanged(b,"BackgroundColor3",color) end
                             end
-                        else for _,b in ipairs(r.bones) do b.Visible=false end end
-                    else r.frame.Visible=false end
+                        else for _,b in ipairs(r.bones) do writeChanged(b,"Visible",false) end end
+                    end
                 end
             end
         end
@@ -3017,7 +3097,7 @@ listen(Run.Heartbeat,function(dt)
     local now=os.clock()
     elapsed=elapsed+dt;state.elapsed=elapsed;speedElapsed=speedElapsed+dt;hueElapsed=hueElapsed+dt
     local char,hum,root=character();local cam=workspace.CurrentCamera
-    if speedElapsed>=0.1 then speedElapsed=0;applySpeed() end
+    if speedElapsed>=0.1 then speedElapsed=0;if cfg.movement or cfg.speedBoost then applySpeed() end end
     if root and hum and hum.Health>0 then
         if cfg.fly and flight and cam then
             local up=state.up;local down=state.down

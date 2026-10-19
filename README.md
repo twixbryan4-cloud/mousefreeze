@@ -1,6 +1,20 @@
 # Huss Valley Panel
 
-Versão 0.6.2 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.3 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Otimização interna na versão 0.6.3
+
+As opções, os valores iniciais, os alcances e os intervalos foram preservados. O Freeze continua com duração configurável até 3 segundos. O ESP continua acompanhando poses e câmera por quadro, e a aquisição nativa de alvos continua em cada Heartbeat quando a ação está disponível.
+
+O ESP compartilha a inversão do CFrame da raiz entre as partes do corpo, evita criar o vetor intermediário de meia dimensão de cada parte e reutiliza a projeção de partes compartilhadas entre ossos e marcadores no mesmo quadro. O cache de projeções é invalidado em cada atualização; não armazena posições de quadros anteriores. Cabeça e direção só são projetadas quando seus marcadores estão ligados. Chams sozinho não executa projeções 2D. Cores e opções visuais estáticas são ajustadas na atualização de dados ou imediatamente ao mudar um controle; coordenadas e vida continuam atualizadas por quadro. Retângulos, linhas e ponto da cabeça deixam de reconstruir suas dimensões de GUI quando as coordenadas não mudam.
+
+Dash, Tackle e Ability verificam disponibilidade e alcance antes de criar uma tarefa. Só uma tentativa pronta para agir abre a tarefa, e todas as condições são verificadas novamente durante sua execução. Assim, a espera por cooldown, resposta do jogo ou entrada de um alvo no alcance não cria uma tarefa por recurso a cada quadro. Adaptadores externos mantêm seu agendamento, cancelamento e proteção contra sobreposição. Mensagens de status iguais não repetem acessos ao rótulo da interface.
+
+Auto Pick e Auto Revive verificam primeiro a distância atual; a leitura e a normalização do texto só acontecem para prompts próximos. Os textos e a posição continuam sendo lidos ao vivo, sem um intervalo adicional de detecção. Os botões de Auto Jump e Freeze suspendem a atualização periódica da interface quando ambos estão desligados e reutilizam o estado visual enquanto texto, cores e segundo exibido do cooldown não mudam. Os pedidos de salto, a pausa do Freeze e seus intervalos foram mantidos.
+
+A comparação executou as funções das versões 0.6.2 e 0.6.3 com a mesma cena simulada de 20 rigs R15 durante 120 quadros. O ESP básico passou de 26.400 para 21.600 chamadas de projeção (18,2% menos); com esqueleto, traço, direção e ponto da cabeça, de 98.400 para 60.000 (39,0% menos). As dimensões do corpo ainda foram calculadas em todos os 2.400 pares personagem/quadro. Com os personagens e a câmera parados, a reconstrução de UDim2 dos marcadores passou de 4.800 no modo básico e 88.800 no modo completo para zero após a preparação inicial. Chams sozinho passou de 2.400 projeções para zero.
+
+Com as três ações nativas ligadas e nenhum alvo no alcance durante 120 quadros, foram criadas zero tarefas, contra 360 antes. Com 500 prompts distantes durante 60 quadros, a normalização de rótulos passou de 30.000 para zero. Os testes também verificaram a primeira ação ao entrar no alcance, alvos saindo antes de uma tarefa executar, limites exatos, movimento do esqueleto, cooldowns e transições dos botões. A sintaxe completa, as 264 asserções de regressão e as 35 verificações adicionais da versão otimizada passaram. Essas são contagens de operações com APIs simuladas; não medem FPS nem uso de CPU/GPU no Roblox ou no celular.
 
 ## Duração do Freeze na versão 0.6.2
 
