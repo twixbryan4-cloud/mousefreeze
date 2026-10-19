@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.4.0
+-- Huss Valley Panel 0.4.1
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -24,7 +24,7 @@ local defaults = {
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
     autoRevive=false, autoPick=false, promptDelay=0.6,
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
-    autoAbility=false, dashSide="Right",tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
+    autoAbility=false, dashSide="Right",dashRange=15,dashDelay=1,dashKey="Q",tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
     autoVote=false, disableGameAFK=false, antiIdle=false, antiHit=false,
     esp=false, boxes=true, names=true, tracers=false, health=true, distance=true,
     skeleton=false, headDot=false, healthText=false, roleColors=true, teamFilter=false,
@@ -42,7 +42,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.4.0", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.4.1", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -228,7 +228,7 @@ local requiresAdapter={autoDash="AutoDash",autoZone="AutoZone",autoDown="AutoDow
     hitbox="HitBox",leaderboard="LeaderboardVisuals",gems="GemsAndCoins",antiHit="AntiHit"}
 local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
     prediction={0,0.5},aimSmooth={1,25},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
-    promptDelay={0.25,3},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85}}
+    promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85}}
 local function valid(key,value)
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
     if type(value)=="number" then
@@ -237,6 +237,7 @@ local function valid(key,value)
     elseif key=="theme" and value~="Dark" and value~="Black" then return false
     elseif key=="accent" and not palette[value] then return false
     elseif key=="dashSide" and value~="Right" and value~="Left" then return false
+    elseif key=="dashKey" and value~="Q" and value~="E" and value~="F" and value~="LeftShift" and value~="LeftControl" and value~="Space" then return false
     elseif key=="toggleKey" then
         local ok,k=pcall(function() return Enum.KeyCode[value] end)
         if not ok or not k or k==Enum.KeyCode.Unknown then return false end
@@ -294,7 +295,7 @@ local close=button(window,"x",12,{Name="Close",Position=UDim2.new(1,-34,0,8),Siz
 local quickButton=button(window,"UI",10,{Name="QuickUIButton",Position=UDim2.new(1,-94,0,8),Size=UDim2.fromOffset(25,23),BackgroundTransparency=1})
 local dragbar=create("Frame",{Name="DragBar",Position=UDim2.fromOffset(60,0),Size=UDim2.new(1,-166,0,34),BackgroundTransparency=1,Active=true},window)
 local body=create("Frame",{Name="Body",Position=UDim2.fromOffset(68,38),Size=UDim2.new(1,-82,1,-68),BackgroundTransparency=1},window)
-local footer=text(window,"HUSS VALLEY  /  v0.4.0",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
+local footer=text(window,"HUSS VALLEY  /  v0.4.1",9,{Name="Footer",Position=UDim2.new(0,70,1,-23),Size=UDim2.new(1,-160,0,14)})
 themed(footer,"TextColor3","muted")
 local fpsLabel=text(window,"-- FPS",9,{Name="FPS",Position=UDim2.new(1,-90,1,-23),Size=UDim2.fromOffset(72,14),TextXAlignment=Enum.TextXAlignment.Right})
 local floating=button(gui,"HV",13,{Name="FloatingButton",Position=UDim2.new(0,12,0.36,0),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
@@ -557,8 +558,11 @@ slider(c,"Smoothness","aimSmooth",1,25,1);checkbox(c,"Auto Face Target","faceTar
 c=card(left,"Auto Use Gears","autoGears","Usa a ferramenta equipada. Nao compra nem inventa ferramentas.")
 slider(c,"Intervalo","gearDelay",0.2,10,0.1,"s")
 pending(left,"Auto Down","autoDown")
-c=card(right,"Auto Dash","autoDash","Dash lateral enquanto voce se move na partida. Aguarda a disponibilidade do jogo.")
-cycle(c,"Lado no movimento","dashSide",{"Right","Left"});API.NativeStatusLabels.dash=text(c,"Status: aguardando partida",9)
+c=card(right,"Auto Dash","autoDash","Aciona o dash do jogo quando um oponente entra no alcance. O delay e o intervalo minimo entre tentativas; o jogo pode exigir mais tempo. Tenta o botao de dash e depois a tecla escolhida; no fallback, use a mesma tecla configurada no jogo.")
+slider(c,"Alcance do inimigo","dashRange",2,100,1," studs");slider(c,"Delay","dashDelay",0.25,10,0.25,"s")
+cycle(c,"Tecla do dash (fallback)","dashKey",{"Q","E","F","LeftShift","LeftControl","Space"})
+API.NativeStatusLabels.dash=text(c,"Status: aguardando partida",9)
+actionButton(c,"Testar dash agora",function() if API.Native then API.Native.Dash(true) end end)
 c=card(right,"Auto Attack","autoAttack","Ataque do jogo contra runners proximos quando voce e catcher. Aguarda a resposta e o intervalo do jogo.")
 slider(c,"Range","attackRange",2,50,1," studs");slider(c,"Delay","attackDelay",0.15,3,0.05,"s")
 API.NativeStatusLabels.attack=text(c,"Status: aguardando partida",9)
@@ -678,7 +682,7 @@ actionButton(configs,"Save Config",function() API.SaveConfig(configName.Text) en
 actionButton(configs,"Load Config",function() API.LoadConfig(configName.Text) end)
 actionButton(configs,"Delete Config",function() API.DeleteConfig(configName.Text) end)
 checkbox(configs,"Auto-Load This Config On Launch","autoLoad");configExpand()
-local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.4.0")
+local suite,suiteExpand=card(right,"Suite",nil,"HUSS VALLEY / 0.4.1")
 actionButton(suite,"Rejoin Server",function() API.Rejoin() end)
 actionButton(suite,"Destroy Menu",function() API.Destroy() end)
 actionButton(suite,"Copiar diagnostico",function() API.ExportDiagnostics() end);suiteExpand()
@@ -1005,13 +1009,14 @@ do
                 local a=actor(p)
                 if a.hum and a.root and a.hum.Health>0 then
                     local delta=a.root.Position-root.Position;local distance=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z
-                    if distance<best then best=distance;target=a.root end
+                    if distance<=best then best=distance;target=a.root end
                 end
             end
         end
         return target
     end
     local function cancel(kind)
+        if kind=="dash" and N.ReleaseDashInput then N.ReleaseDashInput() end
         pending[kind]=nil;status(kind,"Desativado")
     end
     local function available(kind,serverNow,attribute)
@@ -1082,13 +1087,120 @@ do
         local id=Http:GenerateGUID(false)
         return send("ability",r,id,"UseAbility",nil,direction,id,nil,nil)
     end
-    function N.Dash()
-        local char,hum=active("dash");if not char then return false end
-        local r=remote("dash");if not r then return false end
-        if char:GetAttribute("DashReady")~=true or os.clock()-(lastAttempt.dash or -math.huge)<0.85 then status("dash","Aguardando dash disponivel");return false end
-        local from=flatUnit(hum.MoveDirection);if not from then status("dash","Aguardando movimento");return false end
-        local side=Vector3.new(-from.Z,0,from.X)*(cfg.dashSide=="Right" and 1 or -1)
-        return send("dash",r,nil,from,side)
+    local dashInput={buttons={},scanAt=-math.huge,heldKey=nil,manager=nil,observation=nil}
+    function N.ReleaseDashInput()
+        if dashInput.heldKey and dashInput.manager then
+            pcall(function() dashInput.manager:SendKeyEvent(false,dashInput.heldKey,false,game) end)
+        end
+        dashInput.heldKey=nil;dashInput.observation=nil
+    end
+    local function visibleButton(object,playerGui)
+        if not object.Parent or object:IsDescendantOf(gui) or not object:IsDescendantOf(playerGui) then return false end
+        local parent=object
+        while parent and parent~=playerGui do
+            if parent:IsA("GuiObject") and not parent.Visible then return false end
+            if parent:IsA("ScreenGui") and not parent.Enabled then return false end
+            parent=parent.Parent
+        end
+        return true
+    end
+    local function findDashButtons()
+        local playerGui=player:FindFirstChildOfClass("PlayerGui");if not playerGui then return nil end
+        if os.clock()-dashInput.scanAt>=3 then
+            dashInput.scanAt=os.clock();dashInput.buttons={}
+            for _,object in ipairs(playerGui:GetDescendants()) do
+                if (object:IsA("TextButton") or object:IsA("ImageButton")) and not object:IsDescendantOf(gui) then
+                    local name=string.lower(object.Name)
+                    local match=name=="dash" or name=="dashbutton" or name=="dashbtn" or name=="touchdash" or name=="dashaction"
+                    if object:IsA("TextButton") and string.lower(object.Text):match("^%s*dash%s*$") then match=true end
+                    if not match then
+                        for _,child in ipairs(object:GetChildren()) do
+                            if child:IsA("TextLabel") and string.lower(child.Text):match("^%s*dash%s*$") then match=true;break end
+                        end
+                    end
+                    if match and #dashInput.buttons<12 then dashInput.buttons[#dashInput.buttons+1]=object end
+                end
+            end
+        end
+        return playerGui
+    end
+    local function activateDashButton()
+        local playerGui=findDashButtons();if not playerGui then return false end
+        for _,object in ipairs(dashInput.buttons) do
+            if visibleButton(object,playerGui) then
+                for _,event in ipairs({"Activated","MouseButton1Click"}) do
+                    local signal=object[event];local ok,list=false,nil
+                    if type(getconnections)=="function" then ok,list=pcall(getconnections,signal) end
+                    if ok and type(list)=="table" then
+                        local callbacks={}
+                        for _,connection in ipairs(list) do
+                            local good,callback=pcall(function()
+                                if connection.Enabled~=false and connection.Connected~=false then return connection.Function end
+                            end)
+                            if good and type(callback)=="function" then callbacks[#callbacks+1]=callback end
+                        end
+                        if #callbacks>0 then
+                            local fired=false
+                            for _,callback in ipairs(callbacks) do if pcall(callback,nil,1) then fired=true end end
+                            if fired then return true,"Botao do jogo" end
+                        end
+                    elseif type(firesignal)=="function" then
+                        if pcall(firesignal,signal,nil,1) then return true,"Sinal do botao" end
+                    end
+                end
+            end
+        end
+        return false
+    end
+    local function pressDashKey()
+        local key=Enum.KeyCode[cfg.dashKey]
+        if Input:IsKeyDown(key) then return false end
+        local ok,manager=pcall(function() return game:GetService("VirtualInputManager") end)
+        if not ok or not manager then return false end
+        dashInput.manager=manager
+        local sent=pcall(function() manager:SendKeyEvent(true,key,false,game) end)
+        if not sent then pcall(function() manager:SendKeyEvent(false,key,false,game) end);return false end
+        dashInput.heldKey=key
+        task.delay(0.06,function()
+            if dashInput.heldKey==key then
+                pcall(function() manager:SendKeyEvent(false,key,false,game) end);dashInput.heldKey=nil
+            end
+        end)
+        return true,"Tecla "..cfg.dashKey
+    end
+    function N.Dash(test)
+        if not state.alive or game.GameId~=10764627709 then return false end
+        local char,hum,root,role
+        if test==true then
+            char,hum,root=character()
+            if not char or not hum or not root or hum.Health<=0 then return false end
+        else
+            char,hum,root,role=active("dash");if not char then return false end
+        end
+        if Input:GetFocusedTextBox() then status("dash","Aguardando fechar o campo de texto");return false end
+        if test~=true and not opponent(root,cfg.dashRange,role) then status("dash","Nenhum oponente no alcance");return false end
+        if char:GetAttribute("DashReady")==false then status("dash","Aguardando dash disponivel");return false end
+        if os.clock()-(lastAttempt.dash or -math.huge)<cfg.dashDelay then status("dash","Aguardando delay configurado");return false end
+        local before=char:GetAttribute("DashCount")
+        local fired,source=activateDashButton()
+        if not fired then fired,source=pressDashKey() end
+        if not fired then status("dash","Entrada indisponivel: botao/tecla nao acionados");return false end
+        lastAttempt.dash=os.clock()
+        local row=status("dash",source.." acionado; verificando dash")
+        row.sent=row.sent+1;row.source=source
+        local observation={};dashInput.observation=observation
+        local function confirm()
+            if not state.alive or dashInput.observation~=observation or player.Character~=char then return end
+            dashInput.observation=nil
+            local after=char:GetAttribute("DashCount")
+            if finite(before) and finite(after) and after>before then
+                row.confirmed=(row.confirmed or 0)+1;status("dash","DashCount mudou apos "..source)
+            else
+                row.unconfirmed=(row.unconfirmed or 0)+1;status("dash","Entrada acionada; dash nao confirmado")
+            end
+        end
+        if finite(before) and finite(char:GetAttribute("DashCount")) and char:GetAttribute("DashCount")>before then confirm() else task.delay(0.8,confirm) end
+        return true
     end
     local function perform(ctx,kind,fn)
         if ctx.Enabled then if not ctx.IsActive or ctx.IsActive() then fn() end else cancel(kind) end
@@ -1113,7 +1225,7 @@ do
     actions.autoAttack=function(value) if not value then cancel("attack") end end
     if game.GameId==10764627709 then
         install()
-        listen(player.CharacterAdded,function() pending={};recent={} end)
+        listen(player.CharacterAdded,function() pending={};recent={};N.ReleaseDashInput();dashInput.scanAt=-math.huge end)
         listen(Replicated.DescendantAdded,function(object)
             if object:IsA("RemoteEvent") and (object.Name=="MeleeEvent" or object.Name=="GameAction" or object.Name=="GearEvent" or object.Name=="BoostRequest" or object.Name=="HitReplayEvent") then install() end
         end)
@@ -1469,7 +1581,7 @@ local function hitSnapshot(gameStrings)
     for _,key in ipairs({"movement","speedBoost","fly","noclip","tpWalk","autoAttack","autoDash","autoTackle","autoAbility","lockOn","antiHit"}) do sample.features[key]=cfg[key] end
     if API.Native then
         sample.native={}
-        for name,row in pairs(API.Native.Status) do sample.native[name]={sent=row.sent,accepted=row.accepted,rejected=row.rejected,timeouts=row.timeouts,failed=row.failed,message=row.message} end
+        for name,row in pairs(API.Native.Status) do sample.native[name]={sent=row.sent,accepted=row.accepted,rejected=row.rejected,timeouts=row.timeouts,failed=row.failed,confirmed=row.confirmed,unconfirmed=row.unconfirmed,source=row.source,message=row.message} end
     end
     return sample
 end
@@ -2004,6 +2116,7 @@ function API.Destroy()
     if not state.alive then return end
     state.alive=false;perfToken=perfToken+1;xrayToken=xrayToken+1
     endHitTrace("panelClosed",false)
+    if API.Native and API.Native.ReleaseDashInput then API.Native.ReleaseDashInput() end
     for key,name in pairs(requiresAdapter) do if cfg[key] and type(adapters[name])=="function" then pcall(adapters[name],{Enabled=false,Player=player,Config=cfg}) end end
     for _,c in ipairs(connections) do c:Disconnect() end
     Run:UnbindFromRenderStep(renderBindingName)
