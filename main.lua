@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.0
+-- Huss Valley Panel 0.6.1
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -46,7 +46,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.0", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.1", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -860,7 +860,7 @@ c=card(left,"Appearance",nil);cycle(c,"Accent","accent",{"Peach","Purple","Blue"
 card(left,"View Tracer","viewTracer","Mostra a direcao em que os outros jogadores olham.")
 pending(left,"Leaderboard Visuals","leaderboard")
 card(left,"Name Hider","nameHider","Oculta o nome padrao sobre seu personagem apenas neste cliente.")
-c=card(right,"Settings",nil);slider(c,"Max distance","espRange",50,3000,50," studs");slider(c,"Dados / contorno","espRate",2,30,1," Hz")
+c=card(right,"Settings",nil);slider(c,"Max distance","espRange",50,3000,50," studs");slider(c,"Dados / cores","espRate",2,30,1," Hz")
 card(right,"Chams","chams","Contorno local dos jogadores com Highlight.")
 pending(right,"Hit Box","hitbox");pending(right,"Gems & Coins","gems")
 card(right,"Headless","headless","Esconde sua cabeca apenas neste cliente.")
@@ -1400,7 +1400,7 @@ local function nearest(radius)
     for _,p in ipairs(roster) do
         if p~=player and not (cfg.teamCheck and sameTeam(p)) then
             local a=actor(p);local h,r=a.hum,a.root
-            if h and r and h.Health>0 then local delta=r.Position-root.Position;local d=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z;if d<best then best=d;target=r end end
+            if h and r and h.Health>0 then local delta=r.Position-root.Position;local d=delta.X*delta.X+delta.Y*delta.Y+delta.Z*delta.Z;if d<=best then best=d;target=r end end
         end
     end
     return target,math.sqrt(best)
@@ -1441,10 +1441,11 @@ local function processPrompts()
             if wanted and pos and (pos-root.Position).Magnitude<=prompt.MaxActivationDistance then
                 local ok=pcall(fireproximityprompt,prompt)
                 if not ok then set("autoPick",false);set("autoRevive",false);notify("O executor nao conseguiu acionar esse prompt.") end
-                break
+                return ok
             end
         end
     end
+    return false
 end
 local function checkPromptCapability(v)
     if v and type(fireproximityprompt)~="function" then error("fireproximityprompt indisponivel") end
@@ -1454,17 +1455,21 @@ actions.autoPick=checkPromptCapability;actions.autoRevive=checkPromptCapability
 local function triggerTool(attack)
     if attack and API.Native and API.Native.HasMelee() then return API.Native.AttackNearest(cfg.attackRange) end
     local char=player.Character;local tool=char and char:FindFirstChildOfClass("Tool")
-    if tool then tool:Activate() end
+    if tool and tool.Enabled then return pcall(function() tool:Activate() end) end
+    return false
 end
 local adapterTimers,activeAdapters={},{}
 local function stepAdapters(dt)
     for key,name in pairs(activeAdapters) do
         if cfg[key] and type(adapters[name])=="function" and not state.pending[key] then
             adapterTimers[key]=(adapterTimers[key] or 0)+dt
-            if adapterTimers[key]>=0.25 then
-                adapterTimers[key]=0;state.pending[key]=true
+            local callback=adapters[name]
+            local perFrame=API.Native and API.Native.ProximityAdapters[name]==callback
+            if perFrame or adapterTimers[key]>=0.25 then
+                local delta=adapterTimers[key];adapterTimers[key]=0;state.pending[key]=true
                 task.spawn(function()
-                    local ok,err=pcall(adapters[name],{Player=player,Config=cfg,Character=player.Character,Delta=0.25,Enabled=true,
+                    if not state.alive or not cfg[key] or adapters[name]~=callback then state.pending[key]=nil;return end
+                    local ok,err=pcall(callback,{Player=player,Config=cfg,Character=player.Character,Delta=delta,Enabled=true,
                         IsActive=function() return state.alive and cfg[key] end})
                     state.pending[key]=nil
                     if not ok and state.alive then set(key,false,true);notify("Integracao interrompida: "..name);warn("[HV] "..tostring(err)) end
@@ -1475,7 +1480,7 @@ local function stepAdapters(dt)
 end
 for key,name in pairs(requiresAdapter) do actions[key]=function(v)
     -- Auto Zone is one immediate request per activation, never a repeating TP loop.
-    activeAdapters[key]=v and key~="autoZone" and name or nil
+    activeAdapters[key]=v and key~="autoZone" and name or nil;adapterTimers[key]=0
     if type(adapters[name])=="function" and (not v or key=="autoZone") then
         adapters[name]({Player=player,Config=cfg,Character=player.Character,Enabled=v,
             IsActive=function() return state.alive and cfg[key] end})
@@ -1483,7 +1488,7 @@ for key,name in pairs(requiresAdapter) do actions[key]=function(v)
 end end
 -- Native commands transcribed from the user's runtime trace, never enabled by default.
 do
-    local N={Status={},Mapped={}}
+    local N={Status={},Mapped={},ProximityAdapters={}}
     API.Native=N
     local paths={melee="ChickenOrHero.Game.MeleeEvent",tackle="ChickenOrHero.Game.GameAction",
         ability="ChickenOrHero.Gear.GearEvent",dash="ChickenOrHero.Presentation.BoostRequest",replay="ChickenOrHero.Game.HitReplayEvent"}
@@ -1558,7 +1563,7 @@ do
             if os.clock()-request.started<5 then status(kind,"Aguardando resposta do jogo");return false end
             pending[kind]=nil;local row=status(kind,"Resposta nao observada");row.timeouts=row.timeouts+1
         end
-        if os.clock()-(lastAttempt[kind] or -math.huge)<(kind=="attack" and 0.85 or 1.1) then return false end
+        if os.clock()-(lastAttempt[kind] or -math.huge)<(kind=="attack" and cfg.attackDelay or 1.1) then return false end
         local untilTime=readyAt[kind] or 0
         if attribute then local value=player:GetAttribute(attribute);if finite(value) then untilTime=math.max(untilTime,value) end end
         if serverNow<untilTime then status(kind,"Aguardando disponibilidade do jogo");return false end
@@ -1595,7 +1600,7 @@ do
         local _,_,root,role=active("attack","Catcher");if not root then return false end
         local r,now=remote("melee"),clock();if not r or not now or not available("attack",now) then return false end
         local target=opponent(root,radius or cfg.attackRange,role);if not target then status("attack","Nenhum runner ativo no alcance");return false end
-        local direction=flatUnit(target.Position-root.Position);if not direction then return false end
+        local direction=flatUnit(target.Position-root.Position) or flatUnit(root.CFrame.LookVector);if not direction then return false end
         local id=Http:GenerateGUID(false)
         return send("attack",r,id,{id=id,direction=direction,at=now,position=root.Position})
     end
@@ -1603,7 +1608,7 @@ do
         local _,_,root,role=active("tackle","Catcher");if not root then return false end
         local r,now=remote("tackle"),clock();if not r or not now or not available("tackle",now,"TackleReadyAt") then return false end
         local target=opponent(root,cfg.tackleRange,role);if not target then status("tackle","Nenhum runner ativo no alcance");return false end
-        local direction=flatUnit(target.Position-root.Position);if not direction then return false end
+        local direction=flatUnit(target.Position-root.Position) or flatUnit(root.CFrame.LookVector);if not direction then return false end
         local velocity=root.AssemblyLinearVelocity;local speed=Vector3.new(velocity.X,0,velocity.Z).Magnitude
         if not finite(speed) then return false end
         local id=Http:GenerateGUID(false)
@@ -1616,7 +1621,7 @@ do
             local value=player:GetAttribute(attribute);if finite(value) and value>now then status("ability","Aguardando disponibilidade do jogo");return false end
         end
         local target=opponent(root,cfg.abilityRange,role);if not target then status("ability","Nenhum oponente ativo por perto");return false end
-        local direction=flatUnit(target.Position-root.Position);if not direction then return false end
+        local direction=flatUnit(target.Position-root.Position) or flatUnit(root.CFrame.LookVector);if not direction then return false end
         local id=Http:GenerateGUID(false)
         return send("ability",r,id,"UseAbility",nil,direction,id,nil,nil)
     end
@@ -1882,12 +1887,18 @@ do
     local function perform(ctx,kind,fn)
         if ctx.Enabled then if not ctx.IsActive or ctx.IsActive() then fn() end else cancel(kind) end
     end
+    local function installProximity(name,kind,fn)
+        if remote(kind) and type(adapters[name])~="function" then
+            local callback=function(ctx) perform(ctx,kind,fn) end
+            adapters[name]=callback;N.ProximityAdapters[name]=callback
+        end
+    end
     local function install()
         if type(adapters.AutoZone)~="function" then adapters.AutoZone=N.AutoZone end
         N.Mapped.zone=type(adapters.AutoZone)=="function"
-        if remote("dash") and type(adapters.AutoDash)~="function" then adapters.AutoDash=function(ctx) perform(ctx,"dash",N.Dash) end end
-        if remote("tackle") and type(adapters.AutoTackle)~="function" then adapters.AutoTackle=function(ctx) perform(ctx,"tackle",N.Tackle) end end
-        if remote("ability") and type(adapters.AutoAbility)~="function" then adapters.AutoAbility=function(ctx) perform(ctx,"ability",N.UseAbility) end end
+        installProximity("AutoDash","dash",N.Dash)
+        installProximity("AutoTackle","tackle",N.Tackle)
+        installProximity("AutoAbility","ability",N.UseAbility)
         N.Mapped.attack=remote("melee")~=nil;N.Mapped.dash=remote("dash")~=nil;N.Mapped.tackle=remote("tackle")~=nil;N.Mapped.ability=remote("ability")~=nil
         bind("melee",function(id,accepted,data) acknowledge("attack",id,accepted,data) end)
         bind("tackle",function(action,id,accepted,data) if action=="TackleResult" then acknowledge("tackle",id,accepted,data) end end)
@@ -1925,6 +1936,54 @@ function API.Rejoin()
 end
 
 -- ESP objects are created per player and reused. Nothing is drawn while disabled.
+do
+    local geometry={}
+    API.ESPGeometry=geometry
+    local bodyNames={Head=true,Torso=true,["Left Arm"]=true,["Right Arm"]=true,["Left Leg"]=true,["Right Leg"]=true,
+        UpperTorso=true,LowerTorso=true,LeftUpperArm=true,LeftLowerArm=true,LeftHand=true,
+        RightUpperArm=true,RightLowerArm=true,RightHand=true,LeftUpperLeg=true,LeftLowerLeg=true,LeftFoot=true,
+        RightUpperLeg=true,RightLowerLeg=true,RightFoot=true}
+    function geometry.BodyBounds(record,char,root,refresh)
+        -- Only R6/R15 body parts: tools, accessories, effects and auxiliary hitboxes do not size the box.
+        if refresh or record.bodyCharacter~=char then
+            record.bodyParts={};record.bodyCharacter=char
+            for _,part in ipairs(char:GetChildren()) do
+                if bodyNames[part.Name] and part:IsA("BasePart") then record.bodyParts[#record.bodyParts+1]=part end
+            end
+        end
+        local minX,minY,minZ,maxX,maxY,maxZ=math.huge,math.huge,math.huge,-math.huge,-math.huge,-math.huge
+        local count=0
+        for _,part in ipairs(record.bodyParts) do
+            if part.Parent==char then
+                local relative=root.CFrame:ToObjectSpace(part.CFrame)
+                local pos,half=relative.Position,part.Size*0.5
+                local right,up,look=relative.RightVector,relative.UpVector,relative.LookVector
+                local x=math.abs(right.X)*half.X+math.abs(up.X)*half.Y+math.abs(look.X)*half.Z
+                local y=math.abs(right.Y)*half.X+math.abs(up.Y)*half.Y+math.abs(look.Y)*half.Z
+                local z=math.abs(right.Z)*half.X+math.abs(up.Z)*half.Y+math.abs(look.Z)*half.Z
+                minX=math.min(minX,pos.X-x);minY=math.min(minY,pos.Y-y);minZ=math.min(minZ,pos.Z-z)
+                maxX=math.max(maxX,pos.X+x);maxY=math.max(maxY,pos.Y+y);maxZ=math.max(maxZ,pos.Z+z);count=count+1
+            end
+        end
+        if count==0 then return root.CFrame,root.Size end
+        local center=Vector3.new((minX+maxX)/2,(minY+maxY)/2,(minZ+maxZ)/2)
+        return root.CFrame*CFrame.new(center),Vector3.new(maxX-minX,maxY-minY,maxZ-minZ)
+    end
+    function geometry.ProjectBounds(cam,cf,size)
+        local minX,minY,maxX,maxY=math.huge,math.huge,-math.huge,-math.huge
+        local near=math.max(0.05,math.abs(cam.NearPlaneZ))
+        for x=-1,1,2 do for y=-1,1,2 do for z=-1,1,2 do
+            local v=cam:WorldToViewportPoint(cf*Vector3.new(size.X*x/2,size.Y*y/2,size.Z*z/2))
+            -- A corner behind/inside the near plane can project to an arbitrarily large rectangle.
+            if v.Z<=near or v.X~=v.X or v.Y~=v.Y then return end
+            minX=math.min(minX,v.X);minY=math.min(minY,v.Y);maxX=math.max(maxX,v.X);maxY=math.max(maxY,v.Y)
+        end end end
+        local width,height=cam.ViewportSize.X,cam.ViewportSize.Y
+        minX=math.clamp(minX,0,width);minY=math.clamp(minY,0,height)
+        maxX=math.clamp(maxX,0,width);maxY=math.clamp(maxY,0,height)
+        if maxX>minX and maxY>minY then return minX,minY,maxX-minX,maxY-minY end
+    end
+end
 local espRecords={}
 local function clearRecord(p)
     local r=espRecords[p]
@@ -1989,21 +2048,10 @@ updateESP=function(forceData)
                 local center,on=cam:WorldToViewportPoint(root.Position)
                 writeChanged(r.frame,"Visible",on and (cfg.esp or cfg.espTeams or cfg.viewTracer))
                 if on and (cfg.esp or cfg.espTeams or cfg.viewTracer) then
-                    dataDue=dataDue or r.boundsCharacter~=ch or not r.boundOffset
-                    if dataDue then
-                        local bounds,size=ch:GetBoundingBox();r.boundOffset=root.CFrame:ToObjectSpace(bounds);r.boundSize=size
-                        r.boundsCharacter=ch
-                    end
-                    local cf,size=root.CFrame*r.boundOffset,r.boundSize
-                    local minX,minY,maxX,maxY=math.huge,math.huge,-math.huge,-math.huge
-                    local validBox=true
-                    for x=-1,1,2 do for y=-1,1,2 do for z=-1,1,2 do
-                        local v=cam:WorldToViewportPoint(cf*Vector3.new(size.X*x/2,size.Y*y/2,size.Z*z/2))
-                        if v.Z<=0 then validBox=false end
-                        minX=math.min(minX,v.X);minY=math.min(minY,v.Y);maxX=math.max(maxX,v.X);maxY=math.max(maxY,v.Y)
-                    end end end
-                    if validBox then
-                        setESPBounds(r,minX,minY,maxX-minX,maxY-minY)
+                    local cf,size=API.ESPGeometry.BodyBounds(r,ch,root,dataDue)
+                    local minX,minY,width,height=API.ESPGeometry.ProjectBounds(cam,cf,size)
+                    if minX then
+                        setESPBounds(r,minX,minY,width,height)
                         local geometry=cfg.esp and not cfg.espTeams
                         writeChanged(r.box,"Visible",geometry and cfg.boxes);writeChanged(r.stroke,"Color",color)
                         writeChanged(r.name,"Visible",cfg.espTeams or cfg.esp and cfg.names)
@@ -2019,19 +2067,19 @@ updateESP=function(forceData)
                         local healthRatio=math.clamp(h.Health/math.max(1,h.MaxHealth),0,1)
                         if r.healthRatio~=healthRatio then r.healthRatio=healthRatio;r.hp.Size=UDim2.new(0,2,healthRatio,0) end
                         writeChanged(r.tracer,"Visible",geometry and cfg.tracers);writeChanged(r.tracer,"BackgroundColor3",color)
-                        if r.tracer.Visible then moveLine(r.tracer,cam.ViewportSize.X/2-minX,cam.ViewportSize.Y-minY,center.X-minX,maxY-minY) end
+                        if r.tracer.Visible then moveLine(r.tracer,cam.ViewportSize.X/2-minX,cam.ViewportSize.Y-minY,center.X-minX,height) end
                         if not a.head or not a.head.Parent then a.head=ch:FindFirstChild("Head") end
                         local head=a.head or root;local start=cam:WorldToViewportPoint(head.Position)
                         local finish=cam:WorldToViewportPoint(head.Position+head.CFrame.LookVector*5)
-                        writeChanged(r.view,"Visible",cfg.viewTracer and finish.Z>0);writeChanged(r.view,"BackgroundColor3",color)
+                        writeChanged(r.view,"Visible",cfg.viewTracer and start.Z>math.abs(cam.NearPlaneZ) and finish.Z>math.abs(cam.NearPlaneZ));writeChanged(r.view,"BackgroundColor3",color)
                         if r.view.Visible then moveLine(r.view,start.X-minX,start.Y-minY,finish.X-minX,finish.Y-minY) end
-                        writeChanged(r.dot,"Visible",geometry and cfg.headDot);writeChanged(r.dot,"BackgroundColor3",color)
+                        writeChanged(r.dot,"Visible",geometry and cfg.headDot and start.Z>math.abs(cam.NearPlaneZ));writeChanged(r.dot,"BackgroundColor3",color)
                         if r.dot.Visible then r.dot.Position=UDim2.fromOffset(start.X-minX,start.Y-minY) end
                         if cfg.skeleton and geometry then
                             if r.character~=ch then
                                 for _,b in ipairs(r.bones) do b:Destroy() end;r.joints={};r.bones={};r.character=ch
                                 for _,joint in ipairs(ch:GetDescendants()) do
-                                    if joint:IsA("Motor6D") and joint.Part0 and joint.Part1 then
+                                    if joint:IsA("Motor6D") and joint.Part0 and joint.Part1 and joint.Part0.Parent==ch and joint.Part1.Parent==ch then
                                         r.joints[#r.joints+1]=joint;r.bones[#r.bones+1]=line(r.frame,0,0,0,0,color,1)
                                     end
                                 end
@@ -2040,7 +2088,8 @@ updateESP=function(forceData)
                                 local b=r.bones[i];b.Visible=false
                                 if joint.Part0 and joint.Part1 then
                                     local a=cam:WorldToViewportPoint(joint.Part0.Position);local v=cam:WorldToViewportPoint(joint.Part1.Position)
-                                    b.Visible=a.Z>0 and v.Z>0;b.BackgroundColor3=color;moveLine(b,a.X-minX,a.Y-minY,v.X-minX,v.Y-minY)
+                                    b.Visible=a.Z>math.abs(cam.NearPlaneZ) and v.Z>math.abs(cam.NearPlaneZ);b.BackgroundColor3=color
+                                    if b.Visible then moveLine(b,a.X-minX,a.Y-minY,v.X-minX,v.Y-minY) end
                                 end
                             end
                         else for _,b in ipairs(r.bones) do b.Visible=false end end
@@ -2956,15 +3005,17 @@ function API.SaveDiagnostics()
 end
 end
 
--- One heartbeat and one late camera update. Expensive work is rate-limited.
-local elapsed,speedElapsed,promptElapsed,attackElapsed,gearElapsed,hueElapsed,aimElapsed=0,0,0,0,0,0,0
-actions.lockOn=function() state.aimTarget=nil;aimElapsed=1 end
-actions.radius=function() aimElapsed=1 end
-actions.teamCheck=function() aimElapsed=1 end
+-- Proximity uses current positions each heartbeat; cooldowns start only when an action is attempted.
+local elapsed,speedElapsed,hueElapsed=0,0,0
+local lastAction={attack=-math.huge,gear=-math.huge,prompt=-math.huge,promptPending=false}
+actions.lockOn=function() state.aimTarget=nil end
+actions.radius=function() state.aimTarget=nil end
+actions.teamCheck=function() state.aimTarget=nil end
 listen(Run.Heartbeat,function(dt)
     if not state.alive then return end
     API.QuickActions.Step(dt)
-    elapsed=elapsed+dt;state.elapsed=elapsed;speedElapsed=speedElapsed+dt;promptElapsed=promptElapsed+dt;attackElapsed=attackElapsed+dt;gearElapsed=gearElapsed+dt;hueElapsed=hueElapsed+dt;aimElapsed=aimElapsed+dt
+    local now=os.clock()
+    elapsed=elapsed+dt;state.elapsed=elapsed;speedElapsed=speedElapsed+dt;hueElapsed=hueElapsed+dt
     local char,hum,root=character();local cam=workspace.CurrentCamera
     if speedElapsed>=0.1 then speedElapsed=0;applySpeed() end
     if root and hum and hum.Health>0 then
@@ -2981,11 +3032,19 @@ listen(Run.Heartbeat,function(dt)
         end end
         if cfg.tpWalk and not cfg.fly then root.CFrame=root.CFrame+hum.MoveDirection*cfg.tpSpeed*math.min(dt,0.1) end
         if cfg.spin and not cfg.fly then root.CFrame=root.CFrame*CFrame.Angles(0,math.rad(cfg.spinSpeed)*dt,0) end
-        if cfg.autoAttack and attackElapsed>=cfg.attackDelay then attackElapsed=0;if nearest(cfg.attackRange) then triggerTool(true) end end
-        if cfg.autoGears and gearElapsed>=cfg.gearDelay then gearElapsed=0;triggerTool() end
+        if cfg.autoAttack then
+            if API.Native.HasMelee() then API.Native.AttackNearest(cfg.attackRange)
+            elseif now-lastAction.attack>=cfg.attackDelay and nearest(cfg.attackRange) and triggerTool(true) then lastAction.attack=now end
+        end
+        if cfg.autoGears and now-lastAction.gear>=cfg.gearDelay and triggerTool() then lastAction.gear=now end
     end
-    if promptElapsed>=cfg.promptDelay then promptElapsed=0;processPrompts() end
-    if cfg.lockOn and aimElapsed>=0.1 then aimElapsed=0;state.aimTarget=nearest(cfg.radius) end
+    if (cfg.autoPick or cfg.autoRevive) and not lastAction.promptPending and now-lastAction.prompt>=cfg.promptDelay then
+        lastAction.promptPending=true
+        local fired=processPrompts()
+        if fired then lastAction.prompt=os.clock() end
+        lastAction.promptPending=false
+    end
+    if cfg.lockOn then state.aimTarget=nearest(cfg.radius) end
     stepAdapters(dt)
     if hueElapsed>=0.15 then hueElapsed=0;if cfg.rainbow then refreshAccent() end end
 end)
@@ -3058,5 +3117,6 @@ task.defer(function()
     end)
 end)
 return API
+
 
 

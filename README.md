@@ -1,6 +1,22 @@
 # Huss Valley Panel
 
-Versão 0.6.0 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## ESP, alcance e intervalos na versão 0.6.1
+
+O ESP calcula as caixas somente com as partes diretas do corpo R6/R15. Ferramentas, acessórios, efeitos de habilidades e hitboxes auxiliares deixaram de influenciar o tamanho. O HumanoidRootPart só fornece o tamanho como fallback de um rig sem partes reconhecidas. As dimensões e a pose são calculadas a cada quadro, respeitando a escala e a rotação das partes; não dependem mais da frequência dos textos. A projeção oculta caixas que atravessam o plano próximo da câmera e limita o retângulo ao viewport. O esqueleto ignora juntas que levam a peças fora do corpo direto. Isso corrige fontes identificadas no código que podiam gerar caixas enormes; não confirma qual peça específica causou o problema no Huss Valley.
+
+**Dados / cores**, de 2 a 30 Hz, agora regula textos, cores e a atualização da lista de partes do corpo. Movimento, dimensões, barras de vida e projeção permanecem por quadro. ESP de times, filtros e opções anteriores foram preservados.
+
+Auto Dash, Auto Tackle e Auto Ability nativos verificam proximidade em cada Heartbeat, retirando a espera de 0,25 segundo da aquisição. Seus próprios intervalos, papéis, estado da rodada, disponibilidade e respostas do servidor continuam válidos. Adaptadores externos, inclusive funções que substituem um adaptador nativo, conservam a cadência de 0,25 segundo e recebem o tempo real acumulado em Delta. Tarefas pendentes não se sobrepõem e são verificadas novamente antes de executar. Auto Zone continua sendo uma única tentativa imediata por ativação.
+
+Auto Attack usa o delay configurado como intervalo mínimo entre envios, sem o piso local fixo de 0,85 segundo que havia no caminho nativo. Continua aguardando a resposta, readyAt e o recuo após recusa do servidor. O fallback por Tool não gasta o intervalo quando não existe alvo ou ferramenta habilitada. Auto Use Gears também começa seu intervalo quando consegue acionar a ferramenta. Auto Pick e Auto Revive buscam prompts a cada quadro quando estão prontos; ficar fora do alcance não consome o intervalo. Há proteção contra reentrada enquanto uma chamada de prompt estiver pendente.
+
+Lock On adquire e descarta alvos em cada Heartbeat, retirando o intervalo de 0,1 segundo da seleção. Os limites de studs são inclusivos. Attack, Tackle e Ability usam a direção atual do personagem quando os centros dos dois personagens coincidem, evitando uma direção horizontal zerada.
+
+As verificações usam posições atualmente replicadas ao cliente, com distância tridimensional entre raízes ou até o prompt. Não eliminam ping, frames perdidos nem cooldown imposto pelo jogo. Freeze suspende intencionalmente a execução local durante sua pausa e também interrompe essas verificações nesse período. Auto Jump e os demais controles de tempo foram revisados; seus intervalos e comportamento foram mantidos.
+
+A sintaxe do arquivo completo e 263 asserções simuladas passaram: 134 de geometria/projeção, 56 de alcances/agendamento/comandos nativos e 73 de integração do ESP. Foram cobertos efeitos e acessórios gigantes, raiz ampliada, R6/R15 com escala e rotação, proximidade da câmera, respawn, ESP de times, 2 Hz de metadados com movimento por quadro, limites exatos de studs, passagem rápida, 30/60/120 FPS, frames longos, alvos sobrepostos, cancelamento, pendências e intervalos do servidor. Esses testes executam as funções do arquivo com APIs simuladas; o resultado no Roblox/Delta ainda precisa ser conferido no jogo.
 
 ## Carregamento, botões e perfis na versão 0.6.0
 
@@ -252,5 +268,6 @@ As opções começam desligadas. O ESP possui frequência de dados e distância 
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
 
 Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
+
 
 
