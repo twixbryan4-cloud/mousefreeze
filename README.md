@@ -1,6 +1,6 @@
 # Huss Valley Panel
 
-Versão 0.4.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.4.2 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
 
 ## Auto Dash por proximidade na versão 0.4.1
 
@@ -119,6 +119,18 @@ Estas são reduções de trabalho verificadas em simulação; não representam u
 
 O item **Combat > Anti-Hit (pendente)** informa que a proteção ainda não foi implementada nem validada. Ele não ativa sem uma integração real. O diagnóstico identifica `MeleeEvent`, `GameAction`, `MovementGuardEvent` e eventos de replicação, mas não demonstra como hits e mortes são decididos. Alterar a vida exibida ou criar um ForceField somente no cliente não provaria invulnerabilidade no servidor. O código não faz nenhuma dessas simulações de proteção e não dispara eventos com argumentos presumidos.
 
+### Capturar o próprio escudo na versão 0.4.2
+
+Em **Combat > Anti-Hit (pendente) > +**, escolha **Gravar meu escudo** antes de equipar ou ativar o `OneHitShield` pelos controles do jogo. Pode iniciar no lobby e esperar a rodada: a captura dura até 15 minutos e acompanha respawns. Use **Marcar escudo ativado** após a ativação. Se ocorrer um ataque, marque **Hit** na barra superior e termine em **Encerrar e copiar** ou **Parar**. Envie as partes numeradas; **Config > Gravador geral > Copiar próxima parte** continua a mesma exportação. Não é preciso deixar o personagem morrer para registrar o uso do item.
+
+Esse modo observa somente `GearEvent`, `ArmoryEvent`, `MeleeEvent`, `GameAction`, `HitReplayEvent` e o evento `Death` do chrono. As saídas preservam o formato original, incluindo nils e IDs. Ele não usa, equipa, compra nem consome o escudo automaticamente. O `State` recebido no `ArmoryEvent` tem um resumo separado do inventário `gear`, incluindo `OneHitShield`, para evitar que um campo aninhado fique escondido pela truncagem da mensagem inteira.
+
+As amostras recebem `subject`: `localRequest` para solicitações do cliente ou respostas correlacionadas; `localActor` para eventos que identificam seu personagem como autor; `localTarget` quando seu ID/modelo aparece como alvo ou candidato; `unattributed` quando falta essa identificação. Eventos explicitamente atribuídos a outros jogadores são descartados e contados em `excludedOtherPlayerEvents`. IDs de solicitações e ataques ficam em um cache de até 64 entradas, com janela de correlação de 20 segundos. Um alvo listado em `Attack` ainda não confirma acerto nem proteção. Os registros anteriores mostraram efeitos de `OneHitShield` e um veredito `shielded` para outros jogadores; não confirmaram o mecanismo no personagem local.
+
+O resumo `HussValleyShieldSummary` preserva uma sequência de até 80 eventos de interesse: solicitações/respostas selecionadas, mudanças de atributos de proteção, vida, papel/estado da rodada, respawn e marcadores. Guarda até 16 amostras do inventário, com contadores explícitos de descarte. Campos sem dono continuam incertos. O arquivo completo pode ser salvo pelos controles existentes. A próxima integração depende de confirmar ativação, recusa por escudo no alvo local, consumo, duração e condições de reutilização; a captura não estabelece uma falha nem imunidade permanente.
+
+API: `HussValleyPanel.StartShieldDiagnostics()`, `HussValleyPanel.MarkDiagnostics("Escudo ativado")` e `HussValleyPanel.StopHitDiagnostics(true)`.
+
 ### Registro de hits na versão 0.2.1
 
 Abra **Combat > Anti-Hit (pendente)** pelo botão **+** e escolha **Aguardar meu hit**. É possível ativar ainda no lobby: o gravador aguarda até 15 minutos, inclusive durante a partida que já está em andamento. Ele tenta detectar queda de vida, morte ou mudança de estado local que indique captura. Ao observar um desses sinais, coleta mais 5 segundos e copia o resultado. Um hit que acontecer naturalmente durante o jogo pode fornecer a amostra; não há uma janela inicial de apenas 20 segundos para esse modo.
@@ -161,6 +173,8 @@ Para a próxima etapa, execute o painel no jogo e use **Config > Suite > Copiar 
 O ponto de integração é `getgenv().HussValleyPanel.RegisterAction(nome, callback)`. Os nomes esperados constam em `requiresAdapter` no código. O callback recebe `Enabled`, `Player` e `Config`; durante a execução recebe também `Character`, `Delta` e `IsActive()`. Adaptadores que cedem a execução devem conferir `IsActive()` antes de continuar. A desativação e o encerramento chamam o callback com `Enabled = false`.
 
 ## Validação e ciclo de vida
+
+A versão 0.4.2 reproduz uma sequência de uso do próprio escudo, resposta ao pedido, ataque com o jogador local como candidato, veredito `shielded`, consumo e captura posterior. Verifica que tráfego de outros jogadores não ocupa a amostragem local, dados sem identidade continuam incertos, IDs antigos expiram, nils/handlers são preservados, nenhum comando adicional é enviado pelo gravador e o modo continua até o encerramento ou seu limite de 15 minutos. Essa validação usa APIs simuladas; o uso real do escudo ainda precisa ser registrado no jogo.
 
 A versão 0.4.1 acrescenta o teste específico do Auto Dash por proximidade e atualiza o teste de integrações para confirmar que o controlador do jogo é acionado sem exigir caminhada. Todos os demais testes de interface, protocolos, gravação e exportação permanecem na validação.
 
