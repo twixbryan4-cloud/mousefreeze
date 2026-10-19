@@ -1,6 +1,18 @@
 # Huss Valley Panel
 
-Versão 0.4.3 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.5.0 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Shaders na versão 0.5.0
+
+**Shaders > Corredor MM2** liga um visual inspirado na referência enviada: iluminação neutra, contraste moderado, bloom leve, sombras e reflexos nativos do ambiente em superfícies planas. Há controles separados para pisos/tetos e paredes, exposição, saturação, temperatura e acabamento liso opcional. Texturas e materiais originais ficam preservados por padrão; o acabamento liso altera Material/MaterialVariant somente enquanto ligado. Os controles são salvos nas configurações existentes.
+
+Esta implementação usa iluminação e pós-processamento nativos, sem instalar um renderizador externo, SSR ou reflexos espelhados de moedas/personagens como os do vídeo. O resultado dos reflexos depende do material, da iluminação e da qualidade gráfica do Roblox. `Reflectance` e `EnvironmentSpecularScale` não são uma reprodução do renderizador demonstrado na referência.
+
+O controle continua ligado ao mudar de mapa. Descendentes adicionados e peças transmitidas por streaming entram numa fila processada em lotes; peças removidas saem do cache e recuperam seus valores antes de serem reaproveitadas. Para mapas que reutilizam instâncias sem reparentear, os candidatos já conhecidos são reconciliados em lotes após dois segundos sem trabalho pendente. Isso não repete `workspace:GetDescendants()` a cada quadro. Partes de personagens, ferramentas, acessórios, objetos locais, peças móveis, áreas invisíveis e volumes sem uma face plana identificável ficam de fora.
+
+As mudanças da iluminação do mapa são acompanhadas e os dois efeitos próprios são recriados se o jogo os remover. Os efeitos de cor/bloom já existentes no jogo são preservados e podem influenciar o resultado. Desligar restaura os valores anteriores ou a mudança mais recente observada do jogo, destrói somente os efeitos próprios, cancela tarefas antigas e desconecta os cinco observadores desta área. Fechar ou reexecutar o painel faz a mesma limpeza.
+
+Shaders, FPS Booster, Low render quality e Environment/Fullbright são mutuamente exclusivos para evitar que uma área sobrescreva o visual da outra. Ligar Shaders desliga esses três controles; ligar um deles desliga Shaders antes de aplicar a alteração. A barra lateral acomoda a nona categoria sem aumentar o painel. O Auto Zone e os demais recursos de gameplay não foram reescritos.
 
 ## Auto Zone por TP na versão 0.4.3
 
@@ -183,6 +195,8 @@ Para a próxima etapa, execute o painel no jogo e use **Config > Suite > Copiar 
 O ponto de integração é `getgenv().HussValleyPanel.RegisterAction(nome, callback)`. Os nomes esperados constam em `requiresAdapter` no código. O callback recebe `Enabled`, `Player` e `Config`; durante a execução recebe também `Character`, `Delta` e `IsActive()`. Adaptadores que cedem a execução devem conferir `IsActive()` antes de continuar. A desativação e o encerramento chamam o callback com `Enabled = false`.
 
 ## Validação e ciclo de vida
+
+A versão 0.5.0 passou em 62 verificações simuladas do módulo Shaders, setter, configurações e controles gráficos existentes, cobrindo callbacks imediatos e adiados: aplicação inicial, streaming, troca e reaproveitamento de mapas, limpeza de peças antigas, restauração, filtros de geometria, efeitos removidos pelo mapa, iluminação alterada pelo jogo, parâmetros, salvamento/carregamento e conflitos gráficos. A sintaxe do arquivo completo e os 26 casos anteriores do Auto Zone também passaram. Esses testes não executam a renderização Roblox/Delta; a semelhança visual e o desempenho no aparelho ainda precisam de validação no jogo.
 
 A versão 0.4.3 passou na verificação de sintaxe do arquivo inteiro e em 26 casos simulados do Auto Zone: ativação imediata, ausência de repetição, confirmação por estado/lado, correção de posição, zona ausente, altura e orientação da área, conflito de lado, mapa atual e ambiguidade, marcação manual, substituição do mapa, rejeição de Terrain como identidade, cancelamento, falha de TP, preservação de adaptadores externos e das rotinas periódicas, papel, captura, espera, morte e universe incorreto. Esses casos executam o controlador, o setter e o despacho extraídos do próprio arquivo; não executam Roblox/Delta nem confirmam aceitação pelo servidor.
 

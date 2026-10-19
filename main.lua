@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.4.3
+-- Huss Valley Panel 0.5.0
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -33,6 +33,9 @@ local defaults = {
     fpsBoost=false, removeTextures=true, removeDecals=true, removeParticles=true,
     lowDetail=true, noShadows=true, noFog=true, removeAccessories=false,
     unlockFPS=false, fpsCap=120, lowQuality=false,
+    shaders=false, shaderFloors=true, shaderWalls=true, shaderPolish=false, shaderShadows=true,
+    shaderReflection=0.28, shaderWallReflection=0.14, shaderContrast=0.14, shaderSaturation=-0.06,
+    shaderExposure=0.05, shaderBloom=0.12, shaderTemperature=0,
     uiScale=1, opacity=0.94, transparency=6, theme="Dark", accent="Peach", rainbow=false,
     sounds=false, notifications=true, floating=true, toggleKey="RightShift", autoLoad=false,
 }
@@ -42,7 +45,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.4.3", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.5.0", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -228,7 +231,9 @@ local requiresAdapter={autoDash="AutoDash",autoZone="AutoZone",autoDown="AutoDow
     hitbox="HitBox",leaderboard="LeaderboardVisuals",gems="GemsAndCoins",antiHit="AntiHit"}
 local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
     prediction={0,0.5},aimSmooth={1,25},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
-    promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85}}
+    promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
+    shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
+    shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85}}
 local function valid(key,value)
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
     if type(value)=="number" then
@@ -363,6 +368,9 @@ local function icon(parent,kind)
         ring(f,2,3,16,14); text(f,"AI",8,{TextXAlignment=Enum.TextXAlignment.Center,Size=UDim2.fromOffset(20,20)})
     elseif kind=="ESP" then ring(f,1,5,18,10); ring(f,7,7,6,6)
     elseif kind=="World" then ring(f,1,1,18,18); ring(f,6,1,8,18); line(f,1,10,19,10); line(f,3,5,17,5); line(f,3,15,17,15)
+    elseif kind=="Shaders" then
+        line(f,10,0,13,7);line(f,13,7,20,10);line(f,20,10,13,13);line(f,13,13,10,20)
+        line(f,10,20,7,13);line(f,7,13,0,10);line(f,0,10,7,7);line(f,7,7,10,0)
     elseif kind=="Automation" then
         ring(f,5,5,10,10)
         for i=0,7 do local a=i*math.pi/4; line(f,10+math.cos(a)*6,10+math.sin(a)*6,10+math.cos(a)*9,10+math.sin(a)*9) end
@@ -410,9 +418,9 @@ local function selectPage(name)
     if name=="ESP" and refreshPreview then task.defer(refreshPreview) end
 end
 API.SelectPage=selectPage
-local navOrder={"Combat","AI","ESP","World","Automation","Performance","Emotes","Config"}
+local navOrder={"Combat","AI","ESP","World","Shaders","Automation","Performance","Emotes","Config"}
 for i,name in ipairs(navOrder) do
-    local b=button(rail,"",10,{Name="Nav"..name,Position=UDim2.fromOffset(7,53+(i-1)*39),Size=UDim2.fromOffset(40,35),BackgroundTransparency=1})
+    local b=button(rail,"",10,{Name="Nav"..name,Position=UDim2.fromOffset(7,53+(i-1)*35),Size=UDim2.fromOffset(40,31),BackgroundTransparency=1})
     local stroke=accented(create("UIStroke",{Thickness=0.8,Transparency=1},b),"Color")
     local marker=accented(create("Frame",{Position=UDim2.fromOffset(-6,10),Size=UDim2.fromOffset(2,15),BorderSizePixel=0,Visible=false},b),"BackgroundColor3")
     icon(b,name); navs[name]={button=b,stroke=stroke,marker=marker}
@@ -623,7 +631,29 @@ c=card(right,"Spin","spin");slider(c,"Degrees / second","spinSpeed",10,360,10)
 c=card(right,"Camera",nil);checkbox(c,"First Person","firstPerson");checkbox(c,"Unlock Mouse","unlockMouse")
 checkbox(c,"Custom FOV","customFov");slider(c,"FOV","fov",40,120,1)
 
-left,right=page("Automation",6)
+left,right=page("Shaders",6)
+do
+    local content,expand=card(left,"Corredor MM2","shaders","Visual inspirado no corredor: cores neutras, contraste e acabamento refletivo. Os reflexos sao do ambiente; espelhos de personagens e moedas como no video dependem de outros recursos de renderizacao.")
+    API.ShaderStatus=text(content,"Status: desligado",9,{Size=UDim2.new(1,0,0,34),TextWrapped=true})
+    text(content,"Acompanha mapas novos enquanto ligado",9,{TextWrapped=true,Size=UDim2.new(1,0,0,30)})
+    checkbox(content,"Sombras","shaderShadows")
+    slider(content,"Exposicao","shaderExposure",-1,1,0.05)
+    slider(content,"Contraste","shaderContrast",0,0.4,0.01)
+    slider(content,"Saturacao","shaderSaturation",-0.4,0.4,0.02)
+    slider(content,"Temperatura","shaderTemperature",-1,1,0.05)
+    slider(content,"Bloom","shaderBloom",0,0.6,0.02)
+    actionButton(content,"Restaurar visual do jogo",function() set("shaders",false) end)
+    expand()
+    content,expand=card(right,"Superficies",nil,"Trata superficies planas e solidas do cenario, preservando personagens, itens e areas invisiveis. Os materiais originais ficam preservados por padrao; o acabamento liso e opcional.")
+    checkbox(content,"Pisos e tetos","shaderFloors");slider(content,"Reflexo do piso","shaderReflection",0,0.65,0.01)
+    checkbox(content,"Paredes","shaderWalls");slider(content,"Reflexo das paredes","shaderWallReflection",0,0.65,0.01)
+    checkbox(content,"Acabamento liso","shaderPolish")
+    text(content,"Pecas novas recebem o efeito automaticamente. Desligar restaura os valores anteriores.",9,{TextWrapped=true,Size=UDim2.new(1,0,0,45)})
+    text(content,"Shaders desliga FPS Booster, baixa qualidade e Fullbright para manter o visual consistente.",9,{TextWrapped=true,Size=UDim2.new(1,0,0,45)})
+    expand()
+end
+
+left,right=page("Automation",7)
 pending(left,"Auto Spin Wheel","autoWheel");pending(left,"Auto Map Vote","autoVote")
 c=card(left,"Utilities",nil);checkbox(c,"Anti-Idle","antiIdle")
 actionButton(c,"Rejoin Server",function() API.Rejoin() end)
@@ -631,7 +661,7 @@ pending(right,"Auto Claim Journey","autoJourney");pending(right,"Disable Anti-AF
 local _,expandUtility=card(right,"Sobre Anti-Idle",nil,"Anti-Idle so usa a API do cliente ao ficar ocioso. O sistema AFK proprio do jogo continua dependendo da integracao.")
 expandUtility()
 
-left,right=page("Performance",7)
+left,right=page("Performance",8)
 local perfContent,perfExpand=card(left,"FPS Booster","fpsBoost","Reduz efeitos visuais localmente. Desligue uma opcao ou use Restore para recuperar os valores originais.")
 local perfStatus=text(perfContent,"Status: off",9)
 for _,v in ipairs({{"Remove Textures","removeTextures"},{"Remove Decals","removeDecals"},{"Remove Particles & Effects","removeParticles"},
@@ -640,14 +670,14 @@ actionButton(perfContent,"Restore Graphics",function() set("fpsBoost",false);set
 c=card(right,"Display & Quality",nil,"FPS cap so aparece como ativo se o executor fornecer a API. O desempenho depende do aparelho e do jogo.")
 checkbox(c,"Low render quality","lowQuality");checkbox(c,"Unlock FPS","unlockFPS");slider(c,"FPS Cap","fpsCap",30,240,10," fps")
 
-left,right=page("Emotes",8)
+left,right=page("Emotes",9)
 local emoteContent,emoteExpand=card(left,"Avatar Emotes",nil,"Lista os emotes que ja estao equipados no seu avatar. A disponibilidade depende do rig e das animacoes carregadas.")
 local emoteList=create("Frame",{Name="EmoteList",Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundTransparency=1},emoteContent)
 create("UIListLayout",{Padding=UDim.new(0,4)},emoteList)
 actionButton(emoteContent,"Refresh Emotes",function() API.RefreshEmotes() end);emoteExpand()
 c=card(right,"Playback",nil);actionButton(c,"Stop Emote",function() API.StopEmote() end)
 
-left,right=page("Config",9)
+left,right=page("Config",10)
 local customizeExpand
 c,customizeExpand=card(left,"Customize UI",nil,"Cores, transparencia e escala. A interface se ajusta ao tamanho da tela.")
 slider(c,"Escala do menu","uiScale",0.45,1.6,0.05,"x");cycle(c,"Theme","theme",{"Dark","Black"})
@@ -756,6 +786,7 @@ actions.customFov=applyFov;actions.fov=applyFov
 actions.firstPerson=function(v) if v then patch("firstPerson",player,"CameraMode",Enum.CameraMode.LockFirstPerson) else restore("firstPerson") end end
 actions.unlockMouse=function(v) if not v then restore("mouse") end end
 actions.fullbright=function(v)
+    if v and cfg.shaders then set("shaders",false,true) end
     restore("brightness")
     if v then for k,val in pairs({Brightness=2,ClockTime=14,Ambient=Color3.fromRGB(180,180,180),OutdoorAmbient=Color3.fromRGB(180,180,180)}) do patch("brightness",Lighting,k,val) end end
 end
@@ -833,10 +864,13 @@ local function schedulePerformance()
     perfQueued=true
     task.defer(function() perfQueued=false;if state.alive and cfg.fpsBoost then refreshPerformance() end end)
 end
-actions.fpsBoost=function(v) if v then schedulePerformance() else refreshPerformance() end end
+actions.fpsBoost=function(v)
+    if v then if cfg.shaders then set("shaders",false,true) end;schedulePerformance() else refreshPerformance() end
+end
 for _,key in ipairs({"removeTextures","removeDecals","removeParticles","lowDetail","noShadows","noFog","removeAccessories"}) do actions[key]=function() if cfg.fpsBoost then schedulePerformance() end end end
 listen(Lighting.DescendantAdded,function(o) if cfg.fpsBoost then if perfCache then perfCache[o]=true end;optimize(o) end end)
 actions.lowQuality=function(v)
+    if v and cfg.shaders then set("shaders",false,true) end
     restore("quality");if v then
         assert(patch("quality",UserSettings():GetService("UserGameSettings"),"SavedQualityLevel",Enum.SavedQualitySetting.QualityLevel1),"Qualidade grafica protegida nesta versao.")
     end
@@ -850,6 +884,173 @@ local function applyFPS()
     state.capChanged=cfg.unlockFPS
 end
 actions.unlockFPS=applyFPS;actions.fpsCap=function() if cfg.unlockFPS then applyFPS() end end
+
+-- Native shader look: persistent across streamed/replaced maps, with no scene clones.
+do
+    local S={running=false,generation=0,connections={},effects={},records=setmetatable({},{__mode="k"}),
+        candidates=setmetatable({},{__mode="k"}),pending=setmetatable({},{__mode="k"}),light={},desired={}}
+    API.Shaders=S
+    function S.Same(a,b)
+        if type(a)=="number" and type(b)=="number" then return math.abs(a-b)<0.00001 end
+        return a==b
+    end
+    function S.Status(message)
+        if state.alive and API.ShaderStatus then API.ShaderStatus.Text=message end
+    end
+    function S.Write(object,record,property,value)
+        local ok,current=pcall(function() return object[property] end);if not ok then return false end
+        local entry=record[property]
+        if not entry then entry={value=current,last=current};record[property]=entry
+        elseif not S.Same(current,entry.last) then entry.value=current end
+        entry.last=value
+        if S.Same(current,value) then return true end
+        return pcall(function() object[property]=value end)
+    end
+    function S.RestoreProperty(object,record,property)
+        local entry=record[property];if not entry then return end
+        -- A newer game-authored value wins over a stale snapshot when restoring.
+        pcall(function() if S.Same(object[property],entry.last) then object[property]=entry.value end end)
+        record[property]=nil
+    end
+    function S.RestorePart(object)
+        local record=S.records[object];if not record then return end
+        for property in pairs(record) do S.RestoreProperty(object,record,property) end
+        S.records[object]=nil
+    end
+    function S.Surface(object)
+        if not object:IsA("BasePart") or object:IsA("Terrain") or not object:IsDescendantOf(workspace) or ownObject(object)
+            or not object.Anchored or not object.CanCollide or object.Transparency>=0.95 or characterPart(object)
+            or object:FindFirstAncestorOfClass("Tool") or object:FindFirstAncestorOfClass("Accessory") then return end
+        if object.Material==Enum.Material.Neon or object.Material==Enum.Material.ForceField then return end
+        local size,cf=object.Size,object.CFrame
+        local thickness,area,normal=size.Y,size.X*size.Z,cf.UpVector
+        if size.X<thickness then thickness,area,normal=size.X,size.Y*size.Z,cf.RightVector end
+        if size.Z<thickness then thickness,area,normal=size.Z,size.X*size.Y,cf.LookVector end
+        if area<16 or thickness>math.max(size.X,size.Y,size.Z)*0.35 then return end
+        local vertical=math.abs(normal.Y)
+        if vertical>=0.75 then return "floor" elseif vertical<=0.35 then return "wall" end
+    end
+    function S.ApplyPart(object)
+        if not S.running or not cfg.shaders then return end
+        local kind=S.Surface(object)
+        if not kind or (kind=="floor" and not cfg.shaderFloors) or (kind=="wall" and not cfg.shaderWalls) then S.RestorePart(object);return end
+        local record=S.records[object] or {};S.records[object]=record
+        S.Write(object,record,"Reflectance",kind=="floor" and cfg.shaderReflection or cfg.shaderWallReflection)
+        S.Write(object,record,"CastShadow",cfg.shaderShadows)
+        if cfg.shaderPolish then
+            S.Write(object,record,"Material",Enum.Material.SmoothPlastic);S.Write(object,record,"MaterialVariant","")
+        else
+            S.RestoreProperty(object,record,"Material");S.RestoreProperty(object,record,"MaterialVariant")
+        end
+    end
+    function S.RefreshStatus()
+        if not S.running then return end
+        local count=0;for object in pairs(S.records) do if object:IsDescendantOf(workspace) then count=count+1 end end
+        S.Status("Ligado | "..count.." superficies | acompanha mapas novos")
+    end
+    function S.Flush()
+        if S.worker or not S.running then return end
+        S.worker=true;local generation=S.generation
+        task.defer(function()
+            local count=0
+            while S.running and cfg.shaders and generation==S.generation and next(S.pending) do
+                local batch=S.pending;S.pending=setmetatable({},{__mode="k"})
+                for object in pairs(batch) do
+                    if not S.running or not cfg.shaders or generation~=S.generation then return end
+                    if object:IsDescendantOf(workspace) then S.ApplyPart(object) end
+                    count=count+1;if count%160==0 then task.wait() end
+                end
+            end
+            if generation==S.generation then S.worker=false;S.RefreshStatus() end
+        end)
+    end
+    function S.Queue(object)
+        if not S.running or not object:IsA("BasePart") or ownObject(object) then return end
+        S.candidates[object]=true;S.pending[object]=true;S.Flush()
+    end
+    function S.RefreshSurfaces()
+        if not S.running then return end
+        for object in pairs(S.candidates) do
+            if object:IsDescendantOf(workspace) then S.pending[object]=true else S.RestorePart(object);S.candidates[object]=nil end
+        end
+        S.Flush()
+    end
+    function S.ApplyLighting()
+        if not S.running or not cfg.shaders then return end
+        S.desired={Brightness=2.1,Ambient=Color3.fromRGB(70,72,78),OutdoorAmbient=Color3.fromRGB(110,114,122),
+            EnvironmentDiffuseScale=0.65,EnvironmentSpecularScale=1,ExposureCompensation=cfg.shaderExposure,
+            GlobalShadows=cfg.shaderShadows,ShadowSoftness=0.18}
+        for property,value in pairs(S.desired) do S.Write(Lighting,S.light,property,value) end
+        if not S.effects.color or S.effects.color.Parent~=Lighting then
+            S.effects.color=create("ColorCorrectionEffect",{Name="HussShaderColor"},Lighting)
+        end
+        if not S.effects.bloom or S.effects.bloom.Parent~=Lighting then
+            S.effects.bloom=create("BloomEffect",{Name="HussShaderBloom"},Lighting)
+        end
+        local t=cfg.shaderTemperature
+        local tint=t>=0 and Color3.fromRGB(255,238,218) or Color3.fromRGB(225,238,255)
+        local color=S.effects.color
+        color.Enabled=true;color.Brightness=0;color.Contrast=cfg.shaderContrast;color.Saturation=cfg.shaderSaturation
+        color.TintColor=Color3.new(1,1,1):Lerp(tint,math.abs(t))
+        local bloom=S.effects.bloom
+        bloom.Enabled=cfg.shaderBloom>0;bloom.Intensity=cfg.shaderBloom;bloom.Size=18;bloom.Threshold=1.3
+    end
+    function S.ScheduleLighting()
+        if not S.running or S.lightQueued then return end
+        S.lightQueued=true;local generation=S.generation
+        task.defer(function()
+            if S.running and cfg.shaders and generation==S.generation then S.lightQueued=false;S.ApplyLighting() end
+        end)
+    end
+    function S.Stop()
+        S.running=false;S.generation=S.generation+1
+        for _,connection in ipairs(S.connections) do connection:Disconnect() end;S.connections={}
+        for _,effect in pairs(S.effects) do pcall(function() effect:Destroy() end) end;S.effects={}
+        for object in pairs(S.records) do S.RestorePart(object) end
+        for property in pairs(S.light) do S.RestoreProperty(Lighting,S.light,property) end
+        S.records=setmetatable({},{__mode="k"});S.candidates=setmetatable({},{__mode="k"});S.pending=setmetatable({},{__mode="k"})
+        S.light={};S.desired={};S.worker=false;S.lightQueued=false;S.elapsed=0;S.Status("Status: desligado")
+    end
+    function S.Start()
+        S.Stop()
+        for _,key in ipairs({"fpsBoost","lowQuality","fullbright"}) do if cfg[key] then set(key,false,true) end end
+        S.running=true;S.generation=S.generation+1;local generation=S.generation
+        local function connect(signal,callback) S.connections[#S.connections+1]=signal:Connect(callback) end
+        connect(workspace.DescendantAdded,function(object) S.Queue(object) end)
+        connect(workspace.DescendantRemoving,function(object)
+            if S.candidates[object] then S.RestorePart(object);S.candidates[object]=nil;S.pending[object]=nil end
+        end)
+        connect(Lighting.Changed,function(property)
+            local desired=S.desired[property]
+            if desired==nil or S.Same(Lighting[property],desired) then return end
+            if S.light[property] then S.light[property].value=Lighting[property];S.light[property].last=Lighting[property] end
+            S.ScheduleLighting()
+        end)
+        connect(Lighting.DescendantRemoving,function(object)
+            if object==S.effects.color or object==S.effects.bloom then S.ScheduleLighting() end
+        end)
+        -- Reused maps may reset properties without adding/removing any instances.
+        -- Reconcile the cached parts in batches after two idle seconds, not the whole workspace.
+        connect(Run.Heartbeat,function(dt)
+            if S.worker then return end
+            S.elapsed=(S.elapsed or 0)+dt
+            if S.elapsed>=2 then S.elapsed=0;S.RefreshSurfaces() end
+        end)
+        S.ApplyLighting();S.Status("Aplicando visual ao mapa...")
+        task.spawn(function()
+            for index,object in ipairs(workspace:GetDescendants()) do
+                if not state.alive or not S.running or not cfg.shaders or generation~=S.generation then return end
+                S.Queue(object);if index%240==0 then task.wait() end
+            end
+            if generation==S.generation then S.RefreshStatus() end
+        end)
+    end
+    actions.shaders=function(enabled) if enabled then S.Start() else S.Stop() end end
+    for _,key in ipairs({"shaderFloors","shaderWalls","shaderPolish","shaderReflection","shaderWallReflection"}) do actions[key]=S.RefreshSurfaces end
+    actions.shaderShadows=function() S.RefreshSurfaces();S.ScheduleLighting() end
+    for _,key in ipairs({"shaderContrast","shaderSaturation","shaderExposure","shaderBloom","shaderTemperature"}) do actions[key]=S.ScheduleLighting end
+end
+-- End native shaders.
 local xrayToken=0
 actions.xray=function(v)
     xrayToken=xrayToken+1;local token=xrayToken;restore("xray")
@@ -2363,6 +2564,7 @@ end)
 function API.Destroy()
     if not state.alive then return end
     state.alive=false;perfToken=perfToken+1;xrayToken=xrayToken+1
+    if API.Shaders then API.Shaders.Stop() end
     endHitTrace("panelClosed",false)
     if API.Native and API.Native.ReleaseDashInput then API.Native.ReleaseDashInput() end
     for key,name in pairs(requiresAdapter) do if cfg[key] and type(adapters[name])=="function" then pcall(adapters[name],{Enabled=false,Player=player,Config=cfg}) end end
