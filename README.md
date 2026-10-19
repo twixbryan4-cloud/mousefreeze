@@ -1,6 +1,10 @@
 # Huss Valley Panel
 
-Versão 0.6.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.2 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Duração do Freeze na versão 0.6.2
+
+**World > Freeze > Duração da travada** aceita de 0,05 a 3 segundos, com incrementos de 0,01 segundo. O máximo anterior era 0,30 segundo. O slider, a validação dos perfis e o limite aplicado durante a execução foram ampliados juntos; valores acima de 0,30 segundo também podem ser salvos e carregados. A duração inicial continua em 0,12 segundo e os perfis existentes mantêm seus valores. O intervalo entre usos continua configurável de 0,5 a 5 segundos. A execução local fica pausada durante toda a duração escolhida e retorna automaticamente.
 
 ## ESP, alcance e intervalos na versão 0.6.1
 

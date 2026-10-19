@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.1
+-- Huss Valley Panel 0.6.2
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -46,7 +46,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.1", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.2", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -337,7 +337,7 @@ local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,36
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
     shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85},
-    autoJumpInterval={0.1,1},freezeDuration={0.05,0.3},freezeCooldown={0.5,5}}
+    autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5}}
 local function valid(key,value)
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
     if type(value)=="number" then
@@ -556,7 +556,7 @@ do
         if not hum or hum.Health<=0 then notify("Entre no jogo com um personagem vivo para usar Freeze.");return false end
         quick.generation=quick.generation+1
         local ticket=quick.generation
-        local duration=math.clamp(cfg.freezeDuration,0.05,0.3)
+        local duration=math.clamp(cfg.freezeDuration,0.05,3)
         quick.freezeQueued=true;quick.Refresh()
         -- Give the button feedback one frame, then stall this client for the bounded duration.
         -- No anchoring, remote traffic, cooldown modification, or claim of protection from hits.
@@ -877,7 +877,7 @@ do
     local content=card(left,"Auto Jump","autoJumpButton","Liga o botao flutuante. Toque nele para iniciar ou parar os saltos; arraste para reposicionar.")
     slider(content,"Intervalo dos saltos","autoJumpInterval",0.1,1,0.05,"s")
     content=card(left,"Freeze","freezeButton","Liga o botao flutuante para uma travada curta da tela/jogo e retorno automatico.")
-    slider(content,"Duracao da travada","freezeDuration",0.05,0.3,0.01,"s")
+    slider(content,"Duracao da travada","freezeDuration",0.05,3,0.01,"s")
     slider(content,"Intervalo entre usos","freezeCooldown",0.5,5,0.25,"s")
 end
 card(left,"Environment","fullbright","Iluminacao local mais clara.")
