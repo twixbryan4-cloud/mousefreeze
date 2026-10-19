@@ -1,6 +1,25 @@
 # Huss Valley Panel
 
-Versão 0.4.0 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.4.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Auto Dash por proximidade na versão 0.4.1
+
+O usuário esclareceu que a distância desejada é a **proximidade do inimigo**. Em **Combat > Auto Dash**, os novos controles são:
+
+- **Alcance do inimigo:** de 2 a 100 studs, começando em 15. O dash automático só tenta acionar quando existe um oponente vivo e elegível dentro desse raio, incluindo a borda. Esse valor não define o comprimento do dash.
+- **Delay:** de 0,25 a 10 segundos, começando em 1. É o intervalo mínimo entre entradas acionadas. A verificação automática ocorre a cada 0,25 segundo; a disponibilidade e as regras do jogo continuam podendo exigir um intervalo maior. O limite fixo anterior de 0,85 segundo foi removido do Auto Dash.
+- **Tecla do dash (fallback):** Q, E, F, LeftShift, LeftControl ou Space. Deve ser a tecla que o jogo realmente usa para dash. Q é apenas o valor inicial editável; a gravação anterior não confirmou o binding de teclado.
+- **Testar dash agora:** tenta a mesma entrada sem exigir inimigo próximo nem o estado Active. O jogo continua decidindo se permite dash naquele contexto. O teste não liga o toggle automático, não substitui o cooldown e pode ser usado para verificar a entrada enquanto se aguarda a próxima rodada.
+
+O disparo automático deixa de exigir `Humanoid.MoveDirection` diferente de zero e de fabricar um vetor lateral. Ele procura um botão de dash reconhecível no `PlayerGui`, visível e fora do próprio painel. Quando disponíveis, os callbacks Luau já conectados a Activated/MouseButton1Click são acionados sem substituir ou desconectar os handlers do jogo. Na ausência desse caminho, tenta uma pressão curta da tecla configurada por VirtualInputManager, se o executor permitir. O teclado não é acionado enquanto há um campo de texto em foco ou a tecla já está pressionada. Botões novos são encontrados em varreduras espaçadas em três segundos; o HUD não é varrido a cada quadro.
+
+Esse caminho substitui o envio isolado de `BoostRequest` usado pela versão 0.4.0. A amostra mostrou esse pedido de rede, mas não demonstrou que ele, sozinho, inicia o movimento local. A nova implementação entrega a entrada ao controlador do próprio jogo, que pode enviar os pedidos necessários e aplicar seus pré-requisitos. Nenhuma posição, velocidade, animação ou atributo de cooldown é forçado pelo painel.
+
+O status distingue **entrada acionada** de **mudança em DashCount**. O coletor confere o contador por até 0,8 segundo após a tentativa e informa quando o dash não foi confirmado por esse sinal. Uma mudança nesse atributo é apenas observação do cliente, não um veredito de movimento do servidor. Se botão e tecla não puderem ser acionados, o painel informa entrada indisponível. A confirmação depende da interface real do jogo e das APIs do Delta, ainda não disponíveis nesta simulação.
+
+Alcance, delay e tecla são salvos nas configurações. Desligar Auto Dash, renascer ou fechar o painel libera qualquer tecla mantida pelo recurso. `Native.Dash()` usa a proximidade normal; `Native.Dash(true)` corresponde ao teste manual. `dashSide` antigo permanece aceito ao ler configurações anteriores, mas não aparece como controle nem dirige a entrada nova.
+
+A regressão verifica o raio exato, inimigo fora do raio, intervalos configurados, disparo parado, cooldown, papéis, estado seguro, foco de texto, preservação dos callbacks, fallback de tecla, liberação ao desligar/fechar, teste manual, persistência e ausência de varreduras do HUD com o recurso desligado. Esses testes usam o motor simulado e não demonstram sucesso no servidor real.
 
 ## Integrações da versão 0.4.0
 
@@ -143,6 +162,8 @@ O ponto de integração é `getgenv().HussValleyPanel.RegisterAction(nome, callb
 
 ## Validação e ciclo de vida
 
+A versão 0.4.1 acrescenta o teste específico do Auto Dash por proximidade e atualiza o teste de integrações para confirmar que o controlador do jogo é acionado sem exigir caminhada. Todos os demais testes de interface, protocolos, gravação e exportação permanecem na validação.
+
 A versão 0.4.0 verifica os quatro formatos de saída, preservação de nils, IDs e horários novos, gates de papel/estado/alvo, cooldowns, correlação de respostas, recusa por escudo e encerramento sem novos comandos. Um teste separado reproduz cem UUIDs variáveis sem encher o arquivo de ações e preserva distinções entre respostas de equipamentos e motivos de veredito. Os testes anteriores de interface, recursos locais e exportação continuam sendo executados. Essas verificações usam APIs simuladas e não medem sucesso contra o servidor real.
 
 A versão 0.3.0 foi verificada com APIs simuladas para continuidade durante lobby/dano/morte/respawn, coleta de remotes e valores tardios, filtros, limites, marcadores e limpeza. A captura de saída preservou argumentos, nils, retornos, erros e o comportamento de espera simulado de InvokeServer; foram verificados restauração, coexistência com um observador posterior e fallback sem APIs. A exportação foi verificada com JSON longo contendo UTF-8, recomposição exata das partes, salvamento, campo selecionável e isolamento de timers de sessões anteriores. Esses testes não executam o motor Roblox nem o Delta.
@@ -157,3 +178,5 @@ As opções começam desligadas. O ESP possui frequência e distância configur�
 - [Highlight](https://create.roblox.com/docs/reference/engine/classes/Highlight)
 - [Humanoid](https://create.roblox.com/docs/reference/engine/classes/Humanoid)
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
+
+Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
