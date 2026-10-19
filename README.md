@@ -1,6 +1,40 @@
 # Huss Valley Panel
 
-Versão 0.3.1 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.4.0 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Integrações da versão 0.4.0
+
+As oito partes da sessão enviada trouxeram os formatos de ataque, tackle, dash e habilidade, além de respostas e vereditos do jogo. A versão 0.4.0 usa esses formatos em quatro controles que começam desligados. A implementação foi testada com APIs simuladas; a execução e a aceitação dentro do Huss Valley/Delta ainda precisam ser verificadas pelo usuário.
+
+- **Auto Attack:** quando o jogador é Catcher e está em `RunState = Active`, seleciona um Runner próximo e envia o pedido de melee observado. Há somente um pedido pendente por vez. O intervalo combina a configuração do painel, um limite local de 0,85 segundo e `readyAt` recebido do jogo. A distância configurada seleciona alvos; não altera a caixa de colisão nem garante um acerto a essa distância. Na ausência do remote, permanece a ativação genérica da ferramenta equipada.
+- **Auto Tackle:** seleciona um Runner ativo no alcance configurado, envia posição/direção atuais, velocidade horizontal medida e horário do servidor, e aguarda `TackleResult`. Também respeita `TackleReadyAt`. Alcance configurável de 2 a 12 studs, começando em 6.
+- **Auto Dash:** durante uma rodada ativa e enquanto há movimento, envia os dois vetores horizontais observados. A direção lateral é escolhida em relação ao movimento. Aguarda `DashReady = true` e mantém um intervalo local mínimo de 0,85 segundo durante o atraso de replicação. Não altera atributos de cooldown nem velocidade do dash.
+- **Auto Ability:** usa a habilidade equipada quando um oponente está no alcance configurado, começando em 18 studs. Usa o formato de seis argumentos observado, inclusive as posições nil, e aguarda `AbilityReadyAt` e os tempos específicos publicados. O efeito depende da habilidade equipada e da validação do jogo.
+
+Esses comandos só são instalados no universe Huss Valley quando os respectivos remotes existem. Remotes carregados depois são reconhecidos por evento. Personagens sem papel publicado, estados Lobby/Waiting/Safe e alvos reconhecidos como seguros não recebem pedidos de ataque. Os pedidos usam IDs novos e `Workspace:GetServerTimeNow()`; não repetem IDs ou horários da sessão gravada. Recusas produzem uma pausa adicional, e pedidos sem resposta expiram em cinco segundos. Desativar o recurso ou fechar o painel impede novas ações agendadas.
+
+O status distingue comando enviado, pedido aceito, pedido recusado e veredito de acerto. Um `MeleeEvent` aceito não significa que alguém foi atingido: a amostra contém um `HitReplayEvent` do servidor com `accepted = false` e `reason = shielded`. O estado do painel nunca transforma isso em uma promessa de Anti-Hit. O escudo observado é uma mecânica do jogo; o registro não mostra como conceder imunidade permanente.
+
+### Formatos observados
+
+| Ação | Remote relativo a ReplicatedStorage | Argumentos enviados |
+| --- | --- | --- |
+| Melee | ChickenOrHero.Game.MeleeEvent | `{id, direction, at, position}` |
+| Tackle | ChickenOrHero.Game.GameAction | `"Tackle", {id, direction, at, position, speed}` |
+| Dash | ChickenOrHero.Presentation.BoostRequest | vetor de movimento, vetor lateral |
+| Habilidade | ChickenOrHero.Gear.GearEvent | `"UseAbility", nil, direção, id, nil, nil` |
+
+A resposta de melee chega como `id, accepted, metadata`; tackle usa `"TackleResult", id, accepted, metadata`. Respostas `PredictionResult` de Gear são correlacionadas pelo `requestId`, quando disponíveis. O painel não interfere nos handlers existentes e ignora respostas que não correspondem aos seus pedidos. `HitReplayEvent/Verdict` é tratado separadamente e só atualiza o resultado de IDs recentes reconhecidos como pertencentes ao painel.
+
+O ESP e os filtros de time agora usam `GameRole` quando há Runner/Catcher publicados, mesmo se `Team` estiver vazio. Catcher aparece em vermelho e Runner em verde; o time Roblox continua como alternativa quando não há papel conhecido.
+
+### Correção adicional do resumo
+
+A sessão da versão 0.3.1 agrupou IDs UUID variáveis como se fossem ações diferentes. Isso esgotou os 64 grupos e deixou 15 eventos amostrados fora do resumo, incluindo informações de RescueEvent e VowAbilityEvent que aparecem somente nos contadores. A versão 0.4.0 normaliza esses IDs na chave do grupo, preservando os argumentos originais. Também separa resultados por item/tipo/motivo e evita duplicar uma amostra idêntica nos campos first/latest da exportação compacta. Os limites de memória continuam em vigor.
+
+A amostra também mostrou emotes Play/Stop, Gear Use e votação como `"Vote", mapa, identificador`. Isso não confirma a origem/validade do terceiro argumento da votação nem todos os pré-requisitos de equipamentos. Auto Map Vote e Auto Revive por remote permanecem pendentes; os comportamentos anteriores por ferramenta/prompt continuam disponíveis. Auto Zone precisa vincular o ponto seguro ao mapa e lado corretos; a posição de um único marcador Safe não foi usada como destino universal.
+
+API nativa: `HussValleyPanel.Native.AttackNearest(alcance)`, `.Tackle()`, `.Dash()`, `.UseAbility()` e `.Status`. Os controles automáticos usam essas funções, que também verificam o estado da rodada em chamadas manuais. Os snapshots do diagnóstico incluem os contadores dos comandos nativos. Adaptadores externos registrados explicitamente continuam tendo prioridade.
 
 ## Correção do gravador na versão 0.3.1
 
@@ -92,7 +126,7 @@ O arquivo é independente e não baixa bibliotecas de interface. A compatibilida
 - Velocidade local, fly com controles verticais por toque, noclip, deslocamento adicional, salto no ar, spin, primeira pessoa, FOV, mouse livre, iluminação e X-Ray locais.
 - Player Lock On com raio, previsão, suavização e filtro de time opcional. Mira em jogadores vivos; não presume papéis internos nem executa uma captura específica do jogo.
 - ESP de jogadores: caixas, nomes, linhas, vida, distância, articulações, ponto na cabeça, direção de visão, cores por time e Highlight. Inclui preview estático do próprio avatar.
-- Auto Attack e Auto Use Gears ativam a ferramenta equipada. Auto Revive e Auto Pick somente acionam ProximityPrompts reconhecidos, próximos e habilitados, quando o executor oferece `fireproximityprompt`. Auto Revive não implementa reviver a si mesmo por um evento desconhecido.
+- Auto Attack usa a integração de melee descrita acima quando disponível; Auto Use Gears continua ativando a ferramenta equipada. Auto Revive e Auto Pick somente acionam ProximityPrompts reconhecidos, próximos e habilitados, quando o executor oferece `fireproximityprompt`. Auto Revive não implementa reviver a si mesmo por um evento desconhecido.
 - Redução de texturas, efeitos, materiais, sombras e neblina; restauração dos valores anteriores; limite de FPS somente quando o executor oferece `setfpscap`. Restaurar o limite anterior depende de `getfpscap`.
 - Anti-Idle por evento do cliente e reconexão ao servidor. O sistema AFK próprio do jogo é separado.
 - Lista dos emotes já equipados no avatar; salvar, carregar e excluir configurações. Sem acesso a arquivos, as configurações duram apenas na sessão do executor.
@@ -101,13 +135,15 @@ Alterações no cliente podem ser corrigidas pelo servidor. Estes recursos não 
 
 ## Integrações ainda pendentes
 
-Auto Dash, Auto Zone, Auto Down, Auto Tackle, Dash Cooldown, Auto Ability, Runner AI, Catcher AI, Auto Spin Wheel, Auto Claim Journey, Auto Map Vote, Disable Anti-AFK do jogo, Hit Box, Leaderboard Visuals, Gems & Coins e Anti-Hit precisam de mapeamento específico do Huss Valley. Seus controles recusam ativação enquanto não houver um adaptador correspondente. Nenhum evento ou argumento foi inventado a partir do vídeo ou dos nomes recebidos no diagnóstico.
+Auto Zone, Auto Down, Dash Cooldown, Runner AI, Catcher AI, Auto Spin Wheel, Auto Claim Journey, Auto Map Vote, Disable Anti-AFK do jogo, Hit Box, Leaderboard Visuals, Gems & Coins e Anti-Hit precisam de mapeamento específico do Huss Valley. Seus controles recusam ativação enquanto não houver um adaptador correspondente. Nenhum evento ou argumento foi inventado a partir do vídeo ou dos nomes recebidos no diagnóstico.
 
 Para a próxima etapa, execute o painel no jogo e use **Config > Suite > Copiar diagnóstico**. O texto contém caminhos/classes de eventos, prompts e alguns atributos de equipe/estado publicados pelo jogo. Ele fica na área de transferência ou em um campo de texto; não é enviado automaticamente. Esse levantamento identifica a estrutura, mas argumentos e comportamento dos eventos ainda precisam ser confirmados antes da integração.
 
 O ponto de integração é `getgenv().HussValleyPanel.RegisterAction(nome, callback)`. Os nomes esperados constam em `requiresAdapter` no código. O callback recebe `Enabled`, `Player` e `Config`; durante a execução recebe também `Character`, `Delta` e `IsActive()`. Adaptadores que cedem a execução devem conferir `IsActive()` antes de continuar. A desativação e o encerramento chamam o callback com `Enabled = false`.
 
 ## Validação e ciclo de vida
+
+A versão 0.4.0 verifica os quatro formatos de saída, preservação de nils, IDs e horários novos, gates de papel/estado/alvo, cooldowns, correlação de respostas, recusa por escudo e encerramento sem novos comandos. Um teste separado reproduz cem UUIDs variáveis sem encher o arquivo de ações e preserva distinções entre respostas de equipamentos e motivos de veredito. Os testes anteriores de interface, recursos locais e exportação continuam sendo executados. Essas verificações usam APIs simuladas e não medem sucesso contra o servidor real.
 
 A versão 0.3.0 foi verificada com APIs simuladas para continuidade durante lobby/dano/morte/respawn, coleta de remotes e valores tardios, filtros, limites, marcadores e limpeza. A captura de saída preservou argumentos, nils, retornos, erros e o comportamento de espera simulado de InvokeServer; foram verificados restauração, coexistência com um observador posterior e fallback sem APIs. A exportação foi verificada com JSON longo contendo UTF-8, recomposição exata das partes, salvamento, campo selecionável e isolamento de timers de sessões anteriores. Esses testes não executam o motor Roblox nem o Delta.
 
