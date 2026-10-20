@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.9
+-- Huss Valley Panel 0.6.10
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -47,7 +47,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.9", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.10", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -1600,6 +1600,15 @@ do
         if API.LockStatusLabel and API.LockStatusLabel.Text~=K.message then API.LockStatusLabel.Text=K.message end
         if API.QuickActions then API.QuickActions.Refresh() end
     end
+    local function normalCameraType(kind)
+        return kind==Enum.CameraType.Custom or kind==Enum.CameraType.Track or kind==Enum.CameraType.Follow
+            or kind==Enum.CameraType.Orbital or kind==Enum.CameraType.Attach
+    end
+    local function cameraSubjectIsLocal(cam,hum,root)
+        local subject=cam.CameraSubject
+        return subject==hum or subject==root
+            or (subject and subject.Parent==player.Character and subject:IsA("BasePart"))
+    end
     local function restoreCamera()
         local saved=K.saved;K.saved=nil
         if saved and not K.suspended and saved.camera.Parent and saved.camera.CameraType==Enum.CameraType.Scriptable then
@@ -1673,16 +1682,17 @@ do
             reason=reason or "reset"
             K.LastRelease={message=message or "Alvo solto",reason=reason,at=os.clock(),
                 cameraType=cam and cam.CameraType.Name or "none",
+                nativeCameraType=K.saved and K.saved.kind.Name or nil,suspended=K.suspended,
                 distance=root and (K.target.root.Position-root.Position).Magnitude or nil,
                 captureRadius=cfg.radius,releaseRange=math.max(cfg.radius,cfg.lockReleaseRange),
                 health=K.target.hum and K.target.hum.Health or nil,recoveries=K.CameraRecoveries or 0}
             local labels={manual="SOLTO",camera="CAMERA",reset="REINICIADO",character="RESPAWN",parts="CORPO",dead="ALVO MORTO",left="SAIU",team="TIME",range="ALCANCE",occluded="PAREDE",localCharacter="PERSONAGEM",config="AJUSTE"}
             short=labels[reason] or "PRONTO"
-            if reason=="range" and K.LastRelease.distance then short=string.format("ALCANCE %.0f/%.0f",K.LastRelease.distance,K.LastRelease.releaseRange) end
+            if reason=="range" and K.LastRelease.distance then short=string.format("ALCANCE %.1f/%.0f",K.LastRelease.distance,K.LastRelease.releaseRange) end
         end
         restoreCamera()
         K.ClearLook()
-        K.target=nil;K.localCharacter=nil;K.heading=nil;K.occludedAt=nil;K.losClock=0;K.suspended=nil;state.aimTarget=nil
+        K.target=nil;K.localCharacter=nil;K.heading=nil;K.rig=nil;K.occludedAt=nil;K.losClock=0;K.suspended=nil;state.aimTarget=nil
         if marker.Visible then K.fadeAt=os.clock() end
         status(cfg.lockOn and "PRONTO" or "DESLIGADO",cfg.lockOn and (message or "Aperte o botao ou "..cfg.lockKey.." para escolher um alvo") or "Desligado",cfg.lockOn and short or nil)
     end
@@ -1738,13 +1748,15 @@ do
         if K.target then K.Release("Alvo solto; aperte novamente para escolher","manual");return true end
         local char,hum,root=character();local cam=workspace.CurrentCamera
         if not char or not hum or hum.Health<=0 or not root or not cam then status("SEM ALVO","Entre com um personagem vivo");return false end
-        if cam.CameraType==Enum.CameraType.Scriptable then status("INDISPONIVEL","A camera esta sob controle de uma cena do jogo");return false end
+        if not normalCameraType(cam.CameraType) or not cameraSubjectIsLocal(cam,hum,root) then
+            status("INDISPONIVEL","Aguarde a camera voltar ao seu personagem");return false
+        end
         local target=K.Pick(cam,char,root)
         if not target then status("SEM ALVO","Nenhum jogador visivel dentro do raio; mire nele e tente novamente");return false end
         K.target=target;K.localCharacter=char;state.aimTarget=target.root
         K.ClearLook()
         K.saved={camera=cam,kind=cam.CameraType,subject=cam.CameraSubject};K.acquiredAt=os.clock();K.fadeAt=nil
-        K.CameraRecoveries=0
+        K.CameraRecoveries=0;K.LastRecovery=nil;K.LastPause=nil;K.rig=nil
         K.heading=Vector3.new(cam.CFrame.LookVector.X,0,cam.CFrame.LookVector.Z)
         if K.heading.Magnitude<0.01 then K.heading=Vector3.new(0,0,-1) else K.heading=K.heading.Unit end
         filters(char,target.char);K.losClock=0;K.occludedAt=nil
@@ -1787,6 +1799,16 @@ do
         K.StepLook(dt)
         local delta=targetPoint-localPoint
         local flat=Vector3.new(delta.X,0,delta.Z);local distance=flat.Magnitude
+        local alpha=1-math.exp(-math.max(6,cfg.aimSmooth*1.5+2)*math.min(dt,0.1))
+        local rig=K.rig
+        if not rig then
+            local offset=cam.CFrame.Position-(localPoint+flat*0.62)
+            local horizontal=Vector3.new(offset.X,0,offset.Z)
+            if horizontal.Magnitude>0.1 then K.heading=-horizontal.Unit end
+            rig={center=flat*0.62,arm=math.max(1,offset.Magnitude),
+                pitch=math.asin(math.clamp(offset.Y/math.max(1,offset.Magnitude),-1,1)),yaw=0}
+            K.rig=rig
+        end
         if distance>1.5 then
             local desired=flat.Unit
             local current=K.heading or desired
@@ -1798,8 +1820,7 @@ do
         local heading=K.heading or Vector3.new(0,0,-1)
         local blend=math.clamp((distance-5)/17,0,1);blend=blend*blend*(3-2*blend)
         local pitch=math.rad(76-58*blend)
-        local focus=localPoint:Lerp(targetPoint,0.68)
-        local levelFocus=localPoint+flat*0.62
+        local focus=targetPoint
         local halfVertical=math.rad(cam.FieldOfView)*0.5
         local aspect=cam.ViewportSize.X/math.max(1,cam.ViewportSize.Y)
         local halfAngle=math.min(halfVertical,math.atan(math.tan(halfVertical)*math.max(0.2,aspect)))
@@ -1807,10 +1828,17 @@ do
         -- target raises the look point, not the camera rig or its arm length.
         local extent=distance*0.62+3
         local arm=math.max(14,extent/math.max(0.1,math.sin(halfAngle))*1.08)
-        local wanted=levelFocus-heading*(math.cos(pitch)*arm)+Vector3.new(0,math.sin(pitch)*arm,0)
-        local alpha=1-math.exp(-math.max(6,cfg.aimSmooth*1.5+2)*math.min(dt,0.1))
-        local position=cam.CFrame.Position:Lerp(wanted,alpha)
-        -- Resolve obstruction after interpolation as well, so smoothing cannot carry the camera through a wall.
+        -- Smooth the boom in polar coordinates. A fast turn follows an arc instead
+        -- of cutting a chord through the fighters, and local translation has no drag.
+        rig.center=rig.center:Lerp(flat*0.62,alpha)
+        rig.arm=rig.arm+(arm-rig.arm)*alpha
+        rig.pitch=rig.pitch+(math.clamp(pitch-K.manualPitch,math.rad(8),math.rad(84))-rig.pitch)*alpha
+        rig.yaw=rig.yaw+(K.manualYaw-rig.yaw)*alpha
+        local orbitYaw=math.atan2(heading.X,heading.Z)+rig.yaw
+        local orbitHeading=Vector3.new(math.sin(orbitYaw),0,math.cos(orbitYaw))
+        local position=localPoint+rig.center-orbitHeading*(math.cos(rig.pitch)*rig.arm)
+            +Vector3.new(0,math.sin(rig.pitch)*rig.arm,0)
+        -- Resolve obstruction after the orbit is solved, including manual look.
         local ray=position-localPoint
         if ray.Magnitude>0.01 then
             local hit=workspace:Raycast(localPoint,ray,query)
@@ -1818,8 +1846,10 @@ do
         end
         if (focus-position).Magnitude<0.1 then position=focus+Vector3.new(0,0.5,0) end
         local direction=(focus-position).Unit
-        local yaw=math.atan2(direction.X,direction.Z)+K.manualYaw
-        local lookPitch=math.clamp(math.asin(math.clamp(direction.Y,-1,1))+K.manualPitch,-math.rad(85),math.rad(85))
+        -- Most manual input orbits the rig; a small view offset keeps look input
+        -- available while the live target remains the aim anchor throughout turns.
+        local yaw=math.atan2(direction.X,direction.Z)+K.manualYaw*0.2
+        local lookPitch=math.clamp(math.asin(math.clamp(direction.Y,-1,1))+K.manualPitch*0.2,-math.rad(85),math.rad(85))
         local look=Vector3.new(math.sin(yaw)*math.cos(lookPitch),math.sin(lookPitch),math.cos(yaw)*math.cos(lookPitch))
         local frame=CFrame.lookAt(position,position+look)
         local tanY=math.tan(halfVertical);local tanX=tanY*math.max(0.01,aspect)
@@ -1844,14 +1874,13 @@ do
         local look=Vector3.new(point.X,root.Position.Y,point.Z)
         if (look-root.Position).Magnitude>0.1 then root.CFrame=CFrame.lookAt(root.Position,look) end
     end
-    local function cameraSubjectIsLocal(cam,hum,root)
-        local subject=cam.CameraSubject
-        return (K.saved and subject==K.saved.subject) or subject==hum or subject==root
-            or (subject and subject.Parent==K.localCharacter and subject:IsA("BasePart"))
-    end
     local function pauseCamera(reason)
         if K.suspended~=reason then
-            K.suspended=reason;K.ClearLook();K.occludedAt=nil;K.losClock=0
+            K.suspended=reason;K.ClearLook();K.rig=nil;K.occludedAt=nil;K.losClock=0
+            local cam=workspace.CurrentCamera;local _,hum,root=character()
+            K.LastPause={reason=reason,at=os.clock(),cameraType=cam and cam.CameraType.Name or "none",
+                subjectClass=cam and cam.CameraSubject and cam.CameraSubject.ClassName or "none",
+                subjectIsLocal=not not (cam and hum and root and cameraSubjectIsLocal(cam,hum,root))}
             status("PAUSADO","Camera temporaria do jogo; alvo mantido",reason=="subject" and "PAUSA: CENA" or "PAUSA: CAMERA")
         end
         marker.Visible=false
@@ -1894,14 +1923,16 @@ do
         if not cam then pauseCamera("camera");return end
         if K.saved and cam~=K.saved.camera then restoreCamera() end
         if not K.saved then
-            if cam.CameraType~=Enum.CameraType.Custom or not cameraSubjectIsLocal(cam,hum,root) then pauseCamera("camera");return end
+            if not normalCameraType(cam.CameraType) or not cameraSubjectIsLocal(cam,hum,root) then pauseCamera("camera");return end
             -- Claim a replacement camera only after the game returns it to a normal local view.
             K.saved={camera=cam,kind=cam.CameraType,subject=cam.CameraSubject}
         end
         if not cameraSubjectIsLocal(cam,hum,root) then pauseCamera("subject");return end
         if cam.CameraType~=Enum.CameraType.Scriptable then
-            if cam.CameraType==Enum.CameraType.Custom then
-                -- Native jump, dash and combat controls can restore Custom long after a look gesture.
+            if normalCameraType(cam.CameraType) then
+                -- Track/Follow can also be normal local gameplay, not cutscenes.
+                K.saved.kind=cam.CameraType
+                K.LastRecovery={cameraType=cam.CameraType.Name,at=os.clock()}
                 cam.CameraType=Enum.CameraType.Scriptable
                 K.CameraRecoveries=K.CameraRecoveries+1;K.lastRecoveryAt=os.clock()
             else
@@ -3060,12 +3091,15 @@ function API.ExportDiagnostics()
     return presentDiagnostic(Http:JSONEncode(report),"Diagnostico copiado. Envie o texto para mapear as automacoes.")
 end
 function API.CopyLockDiagnostics()
-    local k=API.LockOn
+    local k=API.LockOn;local cam=workspace.CurrentCamera
     local report={kind="LockOnRelease",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
         mode=cfg.lockMode,status=k.Status,shortStatus=k.StatusText,message=k.message,
         captureRadius=cfg.radius,releaseRange=math.max(cfg.radius,cfg.lockReleaseRange),
         wallCheck=cfg.lockWallCheck,teamCheck=cfg.teamCheck,lastRelease=k.LastRelease,
-        cameraRecoveries=k.CameraRecoveries or 0,suspended=k.suspended}
+        cameraRecoveries=k.CameraRecoveries or 0,suspended=k.suspended,
+        cameraType=cam and cam.CameraType.Name or "none",
+        cameraSubjectClass=cam and cam.CameraSubject and cam.CameraSubject.ClassName or "none",
+        lastRecovery=k.LastRecovery,lastPause=k.LastPause}
     return presentDiagnostic(Http:JSONEncode(report),"Motivo do Lock On copiado.")
 end
 
