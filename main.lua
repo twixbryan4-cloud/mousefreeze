@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.5
+-- Huss Valley Panel 0.6.6
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -22,6 +22,7 @@ local defaults = {
     autoJumpButton=false, freezeButton=false, autoJumpInterval=0.15, freezeDuration=0.12, freezeCooldown=1,
     firstPerson=false, unlockMouse=false, fov=70, customFov=false, fullbright=false, xray=false,
     lockOn=false, radius=30, prediction=0.12, aimSmooth=12, faceTarget=false, teamCheck=false,
+    lockMode="Console", lockButton=false, lockKey="L", lockReleaseRange=80, lockWallCheck=true,
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
     autoRevive=false, autoPick=false, promptDelay=0.6,
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
@@ -46,7 +47,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.5", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.6", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -333,12 +334,13 @@ local requiresAdapter={autoDash="AutoDash",autoZone="AutoZone",autoDown="AutoDow
     autoWheel="AutoSpinWheel",autoJourney="AutoClaimJourney",autoVote="AutoMapVote",disableGameAFK="DisableGameAFK",
     hitbox="HitBox",leaderboard="LeaderboardVisuals",gems="GemsAndCoins",antiHit="AntiHit"}
 local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
-    prediction={0,0.5},aimSmooth={1,25},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
+    prediction={0,0.5},aimSmooth={1,25},lockReleaseRange={5,250},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
     shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85},
     autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5}}
-local function valid(key,value)
+local function valid(key,value,keyContext)
+    keyContext=keyContext or cfg
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
     if type(value)=="number" then
         if value~=value or math.abs(value)==math.huge then return false end
@@ -346,15 +348,18 @@ local function valid(key,value)
     elseif key=="theme" and value~="Dark" and value~="Black" then return false
     elseif key=="accent" and not palette[value] then return false
     elseif key=="dashSide" and value~="Right" and value~="Left" then return false
+    elseif key=="lockMode" and value~="Console" and value~="Classico" then return false
     elseif key=="dashKey" and value~="Q" and value~="E" and value~="F" and value~="LeftShift" and value~="LeftControl" and value~="Space" then return false
-    elseif key=="toggleKey" then
+    elseif key=="toggleKey" or key=="lockKey" then
         local ok,k=pcall(function() return Enum.KeyCode[value] end)
         if not ok or not k or k==Enum.KeyCode.Unknown then return false end
+        if key=="lockKey" and (value=="Escape" or value==keyContext.toggleKey or value:match("^Button") or value:match("^DPad") or value:match("^Thumbstick")) then return false end
+        if key=="toggleKey" and value==keyContext.lockKey then return false end
     end
     return true,value
 end
-set=function(key,value,quiet)
-    local ok,newValue=valid(key,value); if not ok then return false end
+set=function(key,value,quiet,keyContext)
+    local ok,newValue=valid(key,value,keyContext); if not ok then return false end
     if newValue==true and requiresAdapter[key] and type(adapters[requiresAdapter[key]])~="function" then
         if not quiet then notify(key=="antiHit" and "Anti-Hit ainda nao validado: falta confirmar como o servidor aplica os hits." or "Essa funcao ainda precisa de integracao com o Huss Valley.") end
         return false
@@ -507,6 +512,7 @@ do
     end
     local jump=make("AutoJump","AUTO JUMP",0.60)
     local freeze=make("Freeze","FREEZE",0.42)
+    local lock=make("LockOn","LOCK ON",0.24)
     local function visibility(entry,wanted)
         if entry.wanted==wanted then return end
         entry.wanted=wanted
@@ -526,11 +532,14 @@ do
         if not state.alive then return end
         local now=os.clock()
         local remaining=math.max(0,math.ceil(quick.readyAt-now))
+        local lockState=API.LockOn and API.LockOn.Status or "PRONTO"
         local style=quick.displayed
         if style and style.jumping==quick.jumping and style.queued==quick.freezeQueued and style.remaining==remaining
+            and style.lockState==lockState
             and style.accent==accent and style.text==colors.text and style.card==colors.card and style.muted==colors.muted then return end
         style=style or {};quick.displayed=style
         style.jumping=quick.jumping;style.queued=quick.freezeQueued;style.remaining=remaining
+        style.lockState=lockState
         style.accent=accent;style.text=colors.text;style.card=colors.card;style.muted=colors.muted
         jump.status.Text=quick.jumping and "LIGADO" or "DESLIGADO"
         jump.status.TextColor3=quick.jumping and Color3.fromRGB(130,231,177) or colors.muted
@@ -538,6 +547,9 @@ do
         freeze.status.Text=quick.freezeQueued and "CONGELANDO..." or remaining>0 and ("COOLDOWN: "..remaining) or "PRONTO"
         freeze.status.TextColor3=(quick.freezeQueued or remaining>0) and Color3.fromRGB(246,191,128) or colors.muted
         freeze.hit.BackgroundColor3=(quick.freezeQueued or remaining>0) and Color3.fromRGB(62,44,31) or colors.card
+        lock.status.Text=lockState
+        lock.status.TextColor3=lockState=="TRAVADO" and Color3.fromRGB(130,231,177) or colors.muted
+        lock.hit.BackgroundColor3=lockState=="TRAVADO" and Color3.fromRGB(25,57,46) or colors.card
         for _,entry in pairs(quick.buttons) do entry.edge.Color=accent;entry.title.TextColor3=colors.text end
     end
     function quick.Update()
@@ -545,9 +557,11 @@ do
         if not cfg.freezeButton then quick.generation=quick.generation+1;quick.freezeQueued=false;quick.readyAt=0 end
         visibility(jump,cfg.autoJumpButton and not state.booting)
         visibility(freeze,cfg.freezeButton and not state.booting)
+        visibility(lock,cfg.lockOn and cfg.lockButton and not state.booting)
         quick.Refresh()
     end
     function quick.Reset()
+        if API.LockOn then API.LockOn.Reset("Pronto para escolher um alvo") end
         quick.jumping=false;quick.generation=quick.generation+1
         quick.freezeQueued=false;quick.readyAt=0;quick.lastJump=-math.huge
         quick.Refresh()
@@ -575,14 +589,18 @@ do
         end)
         return true
     end
-    for _,item in ipairs({{jump,quick.ToggleJump},{freeze,quick.FreezeNow}}) do
+    function quick.ToggleLock()
+        if API.LockOn then return API.LockOn.Toggle() end
+        return false
+    end
+    for _,item in ipairs({{jump,quick.ToggleJump},{freeze,quick.FreezeNow},{lock,quick.ToggleLock}}) do
         local entry,callback=item[1],item[2]
         listen(entry.hit.Activated,function()
             if not entry.drag.moved and os.clock()>=entry.drag.suppressUntil then callback() end
         end)
     end
     function quick.Step(dt)
-        if not cfg.autoJumpButton and not cfg.freezeButton and not quick.jumping and not quick.freezeQueued then return end
+        if not cfg.autoJumpButton and not cfg.freezeButton and not (cfg.lockOn and cfg.lockButton) and not quick.jumping and not quick.freezeQueued then return end
         quick.clock=quick.clock+dt
         if quick.clock>=0.1 then quick.clock=0;quick.Refresh() end
         if not quick.jumping or not cfg.autoJumpButton or state.booting then return end
@@ -602,7 +620,7 @@ do
             if entry.fade then entry.fade:Cancel() end
         end
     end
-    actions.autoJumpButton=quick.Update;actions.freezeButton=quick.Update
+    actions.autoJumpButton=quick.Update;actions.freezeButton=quick.Update;actions.lockButton=quick.Update
     listen(player.CharacterRemoving,quick.Reset)
     listen(player.CharacterAdded,quick.Reset)
 end
@@ -821,9 +839,19 @@ slider(c,"WalkSpeed","walkSpeed",8,150,1)
 c=card(left,"Auto Zone","autoZone","Ao ligar, faz um unico TP para a zona segura registrada. A zona B do registro e reconhecida pela area Safe carregada; pontos de outros mapas nao sao reutilizados.")
 API.NativeStatusLabels.zone=text(c,"Destino: zona B registrada",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
 actionButton(c,"Marcar zona aqui",function() if API.Native then API.Native.CaptureZone() end end)
-c=card(left,"Player Lock On","lockOn","Mira no jogador vivo mais proximo dentro do raio. A captura do jogo precisa de integracao separada.")
-slider(c,"Radius","radius",5,150,1," studs");slider(c,"Prediction","prediction",0,0.5,0.01,"s")
-slider(c,"Smoothness","aimSmooth",1,25,1);checkbox(c,"Auto Face Target","faceTarget");checkbox(c,"Ignorar mesmo time","teamCheck")
+c=card(left,"Player Lock On","lockOn","Console: aperte o botao ou a tecla para travar/soltar o alvo em foco. Mantem o mesmo alvo durante o combate e sobe a camera quando os personagens se aproximam.")
+cycle(c,"Modo","lockMode",{"Console","Classico"})
+checkbox(c,"Mostrar botao flutuante","lockButton")
+API.LockKeyButton=actionButton(c,"Tecla: L (toque para trocar)",function() if API.LockOn then API.LockOn.BeginBind() end end)
+watch("lockKey",function(value) API.LockKeyButton.Text="Tecla: "..value.." (toque para trocar)" end)
+actionButton(c,"Travar / soltar alvo",function() if API.LockOn then API.LockOn.Toggle() end end)
+slider(c,"Raio para escolher alvo","radius",5,150,1," studs")
+slider(c,"Soltar alem de","lockReleaseRange",5,250,1," studs")
+checkbox(c,"Verificar paredes (Console)","lockWallCheck")
+slider(c,"Suavidade da camera","aimSmooth",1,25,1)
+slider(c,"Prediction (Classico)","prediction",0,0.5,0.01,"s")
+checkbox(c,"Auto Face Target","faceTarget");checkbox(c,"Ignorar mesmo time","teamCheck")
+API.LockStatusLabel=text(c,"Desligado",9,{Size=UDim2.new(1,0,0,36),TextWrapped=true})
 c=card(left,"Auto Use Gears","autoGears","No Huss Valley, pede o uso do gear selecionado pelo jogo, separado da habilidade. Em outros jogos, usa a ferramenta equipada.")
 slider(c,"Intervalo","gearDelay",0.2,10,0.1,"s")
 API.NativeStatusLabels.gear=text(c,"Status: aguardando ativacao",9)
@@ -1136,6 +1164,7 @@ end)
 listen(Input.JumpRequest,function() if cfg.infiniteJump then local _,h=character();if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end end end)
 listen(Input.InputBegan,function(i,processed)
     if processed or Input:GetFocusedTextBox() then return end
+    if API.LockOn and API.LockOn.binding then return end
     if i.KeyCode==Enum.KeyCode[cfg.toggleKey] then show(not state.visible) end
 end)
 listen(workspace:GetPropertyChangedSignal("CurrentCamera"),function() restore("camera");applyFov();fit() end)
@@ -1528,6 +1557,242 @@ local function nearest(radius)
         end
     end
     return target,math.sqrt(best)
+end
+-- Console-style combat camera: independent recreation from the supplied videos, not recovered game code.
+do
+    local K={Status="DESLIGADO",message="Desligado",classicPaused=false,losClock=0}
+    API.LockOn=K
+    local white=Color3.fromRGB(255,255,255)
+    local marker=create("CanvasGroup",{Name="ConsoleLockReticle",AnchorPoint=Vector2.new(0.5,0.5),
+        Size=UDim2.fromOffset(84,84),BackgroundTransparency=1,GroupTransparency=1,Visible=false,ZIndex=15},gui)
+    local sizing=create("UIScale",{Scale=1},marker)
+    local borderShape=create("Frame",{Size=UDim2.fromScale(1,1),BackgroundTransparency=1,ZIndex=16},marker)
+    -- Bevelled octagon, with a gap at the middle of each vertical side, and a small central cross.
+    for _,edge in ipairs({{22,2,62,2},{62,2,82,22},{82,22,82,34},{82,50,82,62},
+        {82,62,62,82},{62,82,22,82},{22,82,2,62},{2,62,2,50},{2,34,2,22},{2,22,22,2}}) do
+        local segment=line(borderShape,edge[1],edge[2],edge[3],edge[4],white,1.7);segment.ZIndex=16
+    end
+    for _,edge in ipairs({{37,42,47,42},{42,37,42,47}}) do
+        local segment=line(marker,edge[1],edge[2],edge[3],edge[4],white,1.6);segment.ZIndex=17
+    end
+    K.Reticle=marker
+    local query=RaycastParams.new()
+    query.FilterType=Enum.RaycastFilterType.Exclude;query.IgnoreWater=true;query.RespectCanCollide=true
+    local function filters(char,targetChar)
+        query.FilterDescendantsInstances={char,targetChar,visuals}
+    end
+    local function clearSight(origin,point)
+        local delta=point-origin
+        return delta.Magnitude<0.01 or workspace:Raycast(origin,delta,query)==nil
+    end
+    local function status(value,message)
+        K.Status=value;K.message=message or value
+        if API.LockStatusLabel and API.LockStatusLabel.Text~=K.message then API.LockStatusLabel.Text=K.message end
+        if API.QuickActions then API.QuickActions.Refresh() end
+    end
+    local function restoreCamera()
+        local saved=K.saved;K.saved=nil
+        if saved and saved.camera.Parent and saved.camera.CameraType==Enum.CameraType.Scriptable then
+            saved.camera.CameraType=saved.kind
+        end
+    end
+    function K.Release(message)
+        restoreCamera()
+        K.target=nil;K.localCharacter=nil;K.heading=nil;K.occludedAt=nil;K.losClock=0;state.aimTarget=nil
+        if marker.Visible then K.fadeAt=os.clock() end
+        status(cfg.lockOn and "PRONTO" or "DESLIGADO",cfg.lockOn and (message or "Aperte o botao ou "..cfg.lockKey.." para escolher um alvo") or "Desligado")
+    end
+    function K.Reset(message)
+        if K.CancelBind then K.CancelBind() end
+        K.classicPaused=true
+        K.Release(message)
+    end
+    local function liveTarget(target,localRoot)
+        if not target or target.player.Parent~=Players or target.player.Character~=target.char then return false end
+        local a=actor(target.player)
+        if a.hum~=target.hum or a.root~=target.root or not a.hum or a.hum.Health<=0 or not a.root or a.root.Parent~=target.char then return false end
+        if cfg.teamCheck and sameTeam(target.player) then return false end
+        return (a.root.Position-localRoot.Position).Magnitude<=math.max(cfg.radius,cfg.lockReleaseRange)
+    end
+    function K.Pick(cam,localChar,localRoot)
+        local best,bestScore,bestDistance
+        local view=cam.ViewportSize
+        if view.X<=0 or view.Y<=0 then return end
+        for _,p in ipairs(roster) do
+            if p~=player and p.Parent==Players and not (cfg.teamCheck and sameTeam(p)) then
+                local a=actor(p)
+                if a.char and a.hum and a.hum.Health>0 and a.root and a.root.Parent==a.char then
+                    local distance=(a.root.Position-localRoot.Position).Magnitude
+                    if distance<=cfg.radius then
+                        local point,onScreen=cam:WorldToViewportPoint(a.root.Position+Vector3.new(0,0.5,0))
+                        if onScreen and point.Z>0.1 then
+                            filters(localChar,a.char)
+                            if not cfg.lockWallCheck or clearSight(cam.CFrame.Position,a.root.Position+Vector3.new(0,0.5,0)) then
+                                local x,y=(point.X-view.X*0.5)/view.X,(point.Y-view.Y*0.5)/view.Y
+                                local score=x*x+y*y
+                                if not bestScore or score<bestScore-0.000001 or (math.abs(score-bestScore)<=0.000001 and distance<bestDistance) then
+                                    best={player=p,char=a.char,hum=a.hum,root=a.root};bestScore=score;bestDistance=distance
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return best
+    end
+    function K.Toggle()
+        if not state.alive or state.booting or not cfg.lockOn or Input:GetFocusedTextBox() then return false end
+        if cfg.lockMode=="Classico" then
+            K.classicPaused=not K.classicPaused;K.Release(K.classicPaused and "Pausado; aperte novamente para retomar" or "Classico: procurando o jogador mais proximo")
+            return true
+        end
+        if K.target then K.Release("Alvo solto; aperte novamente para escolher");return true end
+        local char,hum,root=character();local cam=workspace.CurrentCamera
+        if not char or not hum or hum.Health<=0 or not root or not cam then status("SEM ALVO","Entre com um personagem vivo");return false end
+        if cam.CameraType==Enum.CameraType.Scriptable then status("INDISPONIVEL","A camera esta sob controle de uma cena do jogo");return false end
+        local target=K.Pick(cam,char,root)
+        if not target then status("SEM ALVO","Nenhum jogador visivel dentro do raio; mire nele e tente novamente");return false end
+        K.target=target;K.localCharacter=char;state.aimTarget=target.root
+        K.saved={camera=cam,kind=cam.CameraType};K.acquiredAt=os.clock();K.fadeAt=nil
+        K.heading=Vector3.new(cam.CFrame.LookVector.X,0,cam.CFrame.LookVector.Z)
+        if K.heading.Magnitude<0.01 then K.heading=Vector3.new(0,0,-1) else K.heading=K.heading.Unit end
+        filters(char,target.char);K.losClock=0;K.occludedAt=nil
+        cam.CameraType=Enum.CameraType.Scriptable
+        status("TRAVADO","Alvo: "..target.player.DisplayName.." | aperte para soltar")
+        return true
+    end
+    local function hideMarker(dt,cam)
+        if not marker.Visible then return end
+        local t=math.clamp((os.clock()-(K.fadeAt or os.clock()))/0.15,0,1)
+        marker.GroupTransparency=t
+        sizing.Scale=(K.markerScale or 1)*(1+t*0.16)
+        if t>=1 or not cam then marker.Visible=false;K.fadeAt=nil end
+    end
+    function K.Draw(cam,point)
+        local screen,visible=cam:WorldToViewportPoint(point)
+        if not visible or screen.Z<=0.1 or K.occludedAt then marker.Visible=false;return end
+        local view=cam.ViewportSize
+        local pixels=view.Y*2.8/(2*math.tan(math.rad(cam.FieldOfView)*0.5)*screen.Z)
+        local maxSize=math.min(110,math.min(view.X,view.Y)*0.22)
+        local size=math.clamp(pixels,math.min(38,maxSize),maxSize)
+        local t=math.clamp((os.clock()-(K.acquiredAt or 0))/0.18,0,1)
+        local ease=1-(1-t)^3
+        K.markerScale=size/84
+        sizing.Scale=K.markerScale*(1+(1-ease)*0.38)
+        borderShape.Rotation=(1-ease)*12
+        marker.Position=UDim2.fromOffset(screen.X,screen.Y)
+        marker.GroupTransparency=1-ease;marker.Visible=true
+    end
+    function K.Solve(localPoint,targetPoint,cam,dt)
+        local delta=targetPoint-localPoint
+        local flat=Vector3.new(delta.X,0,delta.Z);local distance=flat.Magnitude
+        if distance>1.5 then
+            local desired=flat.Unit
+            local current=K.heading or desired
+            local a,b=math.atan2(current.X,current.Z),math.atan2(desired.X,desired.Z)
+            local turn=math.atan2(math.sin(b-a),math.cos(b-a))
+            a=a+turn*(1-math.exp(-math.max(8,cfg.aimSmooth)*math.min(dt,0.1)))
+            K.heading=Vector3.new(math.sin(a),0,math.cos(a))
+        end
+        local heading=K.heading or Vector3.new(0,0,-1)
+        local blend=math.clamp((distance-5)/17,0,1);blend=blend*blend*(3-2*blend)
+        local pitch=math.rad(76-58*blend)
+        local focus=localPoint:Lerp(targetPoint,0.62)
+        local halfVertical=math.rad(cam.FieldOfView)*0.5
+        local aspect=cam.ViewportSize.X/math.max(1,cam.ViewportSize.Y)
+        local halfAngle=math.min(halfVertical,math.atan(math.tan(halfVertical)*math.max(0.2,aspect)))
+        local extent=delta.Magnitude*0.62+3
+        local arm=math.max(14,extent/math.max(0.1,math.sin(halfAngle))*1.08)
+        local wanted=focus-heading*(math.cos(pitch)*arm)+Vector3.new(0,math.sin(pitch)*arm,0)
+        local alpha=1-math.exp(-cfg.aimSmooth*math.min(dt,0.1))
+        local position=cam.CFrame.Position:Lerp(wanted,alpha)
+        -- Resolve obstruction after interpolation as well, so smoothing cannot carry the camera through a wall.
+        local ray=position-focus
+        if ray.Magnitude>0.01 then
+            local hit=workspace:Raycast(focus,ray,query)
+            if hit then position=hit.Position+hit.Normal*0.65 end
+        end
+        if (focus-position).Magnitude<0.1 then position=focus+Vector3.new(0,0.5,0) end
+        return CFrame.lookAt(position,focus),focus,pitch
+    end
+    local function face(root,hum,point)
+        if not cfg.faceTarget or root.Anchored or hum.Sit or hum.PlatformStand then return end
+        local look=Vector3.new(point.X,root.Position.Y,point.Z)
+        if (look-root.Position).Magnitude>0.1 then root.CFrame=CFrame.lookAt(root.Position,look) end
+    end
+    function K.Step(dt,cam,hum,root)
+        if not cfg.lockOn or state.booting or not cam or not root or not hum or hum.Health<=0 then
+            if K.target or K.saved or state.aimTarget then K.Release("Personagem indisponivel; escolha o alvo novamente") end
+            hideMarker(dt,cam);return
+        end
+        if cfg.lockMode=="Classico" then
+            if not K.classicPaused then
+                local target=nearest(cfg.radius)
+                if target~=state.aimTarget then
+                    state.aimTarget=target;K.acquiredAt=os.clock();K.fadeAt=nil
+                    if not target then K.fadeAt=os.clock() end
+                    status(target and "TRAVADO" or "SEM ALVO",target and "Classico: jogador mais proximo" or "Classico: aguardando alvo no raio")
+                end
+                if target then
+                    local point=target.Position+target.AssemblyLinearVelocity*cfg.prediction
+                    if (point-cam.CFrame.Position).Magnitude>0.1 then
+                        cam.CFrame=cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position,point),1-math.exp(-cfg.aimSmooth*dt))
+                    end
+                    face(root,hum,point);K.Draw(cam,target.Position+Vector3.new(0,0.5,0));return
+                end
+            end
+            hideMarker(dt,cam);return
+        end
+        local target=K.target
+        if not target then hideMarker(dt,cam);return end
+        if not K.saved or cam~=K.saved.camera or cam.CameraType~=Enum.CameraType.Scriptable then K.Release("Camera alterada pelo jogo; escolha o alvo novamente");hideMarker(dt,cam);return end
+        if player.Character~=K.localCharacter or not liveTarget(target,root) then K.Release("Alvo fora das condicoes; aperte para escolher outro");hideMarker(dt,cam);return end
+        local point=target.root.Position+Vector3.new(0,0.5,0)
+        K.losClock=K.losClock+dt
+        if K.losClock>=0.1 then
+            K.losClock=0
+            if cfg.lockWallCheck and not clearSight(root.Position+Vector3.new(0,1.5,0),point) then K.occludedAt=K.occludedAt or os.clock()
+            else K.occludedAt=nil end
+        end
+        if K.occludedAt and os.clock()-K.occludedAt>=0.65 then K.Release("Alvo encoberto; aperte para escolher outro");hideMarker(dt,cam);return end
+        local frame,focus=K.Solve(root.Position+Vector3.new(0,1,0),point,cam,dt)
+        cam.CFrame=frame;cam.Focus=CFrame.new(focus)
+        face(root,hum,point);K.Draw(cam,point)
+    end
+    function K.CancelBind()
+        K.binding=false
+        if API.LockKeyButton then API.LockKeyButton.Text="Tecla: "..cfg.lockKey.." (toque para trocar)" end
+    end
+    function K.BeginBind()
+        if not state.alive or state.booting then return end
+        K.binding=true
+        API.LockKeyButton.Text="Aperte uma tecla | Esc cancela"
+    end
+    function K.OnInput(input,processed)
+        if not state.alive or state.booting then return end
+        if input.UserInputType~=Enum.UserInputType.Keyboard or Input:GetFocusedTextBox() then return end
+        if K.binding then
+            if input.KeyCode==Enum.KeyCode.Escape then K.CancelBind();return end
+            if processed then return end
+            if set("lockKey",input.KeyCode.Name,true) then K.CancelBind()
+            else notify("Escolha uma tecla de teclado diferente da tecla do menu.") end
+            return
+        end
+        if not processed and input.KeyCode==Enum.KeyCode[cfg.lockKey] then K.Toggle() end
+    end
+    function K.Configure()
+        K.CancelBind();K.classicPaused=false;K.Release()
+        API.QuickActions.Update()
+    end
+    function K.Stop()
+        K.CancelBind();K.Reset();marker.Visible=false
+    end
+    actions.lockOn=K.Configure;actions.lockMode=K.Configure
+    actions.lockKey=K.CancelBind
+    listen(Input.InputBegan,K.OnInput)
+    listen(Input.WindowFocusReleased,function() K.CancelBind() end)
+    listen(workspace:GetPropertyChangedSignal("CurrentCamera"),function() K.Reset("Camera trocada; escolha o alvo novamente") end)
 end
 local prompts,promptsReady,promptsScanning={},false,false
 local function indexPrompt(o) if o:IsA("ProximityPrompt") then prompts[o]=true end end
@@ -2455,12 +2720,14 @@ do
     local function layoutData()
         return {window=packPosition(window.Position),launcher=packPosition(API.UI.FloatingHost.Position),
             autoJump=packPosition(API.QuickActions.buttons.AutoJump.host.Position),
-            freeze=packPosition(API.QuickActions.buttons.Freeze.host.Position)}
+            freeze=packPosition(API.QuickActions.buttons.Freeze.host.Position),
+            lockOn=packPosition(API.QuickActions.buttons.LockOn.host.Position)}
     end
     local function restoreLayout(layout)
         if type(layout)~="table" then return end
         for _,entry in ipairs({{"window",window},{"launcher",API.UI.FloatingHost},
-            {"autoJump",API.QuickActions.buttons.AutoJump.host},{"freeze",API.QuickActions.buttons.Freeze.host}}) do
+            {"autoJump",API.QuickActions.buttons.AutoJump.host},{"freeze",API.QuickActions.buttons.Freeze.host},
+            {"lockOn",API.QuickActions.buttons.LockOn.host}}) do
             local values=layout[entry[1]]
             if type(values)=="table" then
                 local validPosition=true
@@ -2529,9 +2796,10 @@ do
         for key,initial in pairs(defaults) do
             local candidate=data[key]
             if key=="transparency" and candidate==nil and type(data.opacity)=="number" then candidate=(1-data.opacity)*100 end
-            local ok,value=valid(key,candidate)
+            local ok,value=valid(key,candidate,{})
             if ok then values[key]=value else values[key]=initial end
         end
+        if values.lockKey==values.toggleKey then values.lockKey=values.toggleKey=="L" and "K" or "L" end
         -- Stop transient presses and drags; selecting a row alone never enters this path.
         for input,pointer in pairs(pointerSessions) do
             pointerSessions[input]=nil;if pointer.finish then pointer.finish(input) end
@@ -2540,7 +2808,7 @@ do
         applying=true
         -- Parameters first, then disabled flags, then enabled flags.
         for key,initial in pairs(defaults) do
-            if type(initial)~="boolean" and key~="opacity" then set(key,values[key],true) end
+            if type(initial)~="boolean" and key~="opacity" then set(key,values[key],true,values) end
         end
         for _,enabled in ipairs({false,true}) do for key,initial in pairs(defaults) do
             if type(initial)=="boolean" and key~="autoLoad" and values[key]==enabled then set(key,enabled,true) end
@@ -3266,9 +3534,6 @@ end
 -- Proximity uses current positions each heartbeat; cooldowns start only when an action is attempted.
 local elapsed,speedElapsed,hueElapsed=0,0,0
 local lastAction={attack=-math.huge,gear=-math.huge,prompt=-math.huge,promptPending=false}
-actions.lockOn=function() state.aimTarget=nil end
-actions.radius=function() state.aimTarget=nil end
-actions.teamCheck=function() state.aimTarget=nil end
 listen(Run.Heartbeat,function(dt)
     if not state.alive then return end
     API.QuickActions.Step(dt)
@@ -3302,7 +3567,6 @@ listen(Run.Heartbeat,function(dt)
         if fired then lastAction.prompt=os.clock() end
         lastAction.promptPending=false
     end
-    if cfg.lockOn then state.aimTarget=nearest(cfg.radius) end
     stepAdapters(dt)
     if hueElapsed>=0.15 then hueElapsed=0;if cfg.rainbow then refreshAccent() end end
 end)
@@ -3313,18 +3577,7 @@ Run:BindToRenderStep(renderBindingName,Enum.RenderPriority.Camera.Value+1,functi
     if uiDirty and state.visible then applyAppearance() end
     if cfg.unlockMouse then patch("mouse",Input,"MouseBehavior",Enum.MouseBehavior.Default) end
     local _,hum,root=character();local cam=workspace.CurrentCamera
-    if cfg.lockOn and cam and root and hum and hum.Health>0 then
-        local target=state.aimTarget
-        if target and target.Parent and (target.Position-root.Position).Magnitude<=cfg.radius then
-            local predicted=target.Position+target.AssemblyLinearVelocity*cfg.prediction
-            local pos=cam.CFrame.Position
-            if (predicted-pos).Magnitude>0.1 then cam.CFrame=cam.CFrame:Lerp(CFrame.lookAt(pos,predicted),1-math.exp(-cfg.aimSmooth*dt)) end
-            if cfg.faceTarget then
-                local look=Vector3.new(predicted.X,root.Position.Y,predicted.Z)
-                if (look-root.Position).Magnitude>0.1 then root.CFrame=CFrame.lookAt(root.Position,look) end
-            end
-        end
-    end
+    API.LockOn.Step(dt,cam,hum,root)
     renderESP(dt) -- project current poses after all camera changes, without positional interpolation.
     if state.time>=0.75 then
         fpsLabel.Text=string.format("%d FPS",math.floor(state.frames/state.time+0.5))
@@ -3348,6 +3601,7 @@ function API.Destroy()
     if API.UI then API.UI.Stop() end
     if API.Loading then API.Loading.Stop() end
     if API.QuickActions then API.QuickActions.Stop() end
+    if API.LockOn then API.LockOn.Stop() end
     if API.ConfigUI then API.ConfigUI.Stop() end
     for input in pairs(pointerSessions) do pointerSessions[input]=nil end
     if API.Shaders then API.Shaders.Stop() end
