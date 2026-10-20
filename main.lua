@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.10
+-- Huss Valley Panel 0.6.11
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -47,7 +47,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.10", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.11", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -1593,7 +1593,52 @@ do
     end
     local function clearSight(origin,point)
         local delta=point-origin
-        return delta.Magnitude<0.01 or workspace:Raycast(origin,delta,query)==nil
+        if delta.Magnitude<0.01 then return true end
+        local hit=workspace:Raycast(origin,delta,query)
+        return hit==nil,hit
+    end
+    local function bodyPart(char,name)
+        local part=char and char:FindFirstChild(name)
+        if part and part.Parent==char and part:IsA("BasePart") then return part end
+    end
+    local function torsoPart(char)
+        return bodyPart(char,"UpperTorso") or bodyPart(char,"Torso") or bodyPart(char,"LowerTorso")
+    end
+    local function bodyPosition(char,hum,root)
+        local torso=torsoPart(char)
+        if torso then
+            local mode=hum and hum:GetState()
+            if (hum and hum.PlatformStand) or mode==Enum.HumanoidStateType.Ragdoll or mode==Enum.HumanoidStateType.FallingDown
+                or mode==Enum.HumanoidStateType.Physics or mode==Enum.HumanoidStateType.GettingUp
+                or (torso.Position-root.Position).Magnitude>4 then return torso.Position end
+        end
+        return root.Position
+    end
+    local function visibleBody(origin,char,point)
+        local visible,firstHit=clearSight(origin,point)
+        if visible then return true end
+        -- A root can sink into the floor during ragdoll while the real body stays visible.
+        for index=1,2 do
+            local part
+            if index==1 then part=bodyPart(char,"Head") else part=torsoPart(char) end
+            if part then
+                local sample=part.Position+Vector3.new(0,0.2,0)
+                if (sample-point).Magnitude>0.1 and clearSight(origin,sample) then return true end
+            end
+        end
+        return false,firstHit
+    end
+    local function combatVisible(localChar,localPosition,targetChar,point)
+        local head=bodyPart(localChar,"Head")
+        local origin=head and head.Position+Vector3.new(0,0.15,0) or localPosition+Vector3.new(0,1.5,0)
+        local visible,hit=visibleBody(origin,targetChar,point)
+        if visible then return true end
+        local torso=torsoPart(localChar)
+        if torso then
+            local alternate=torso.Position+Vector3.new(0,0.35,0)
+            if (alternate-origin).Magnitude>0.2 and visibleBody(alternate,targetChar,point) then return true end
+        end
+        return false,hit
     end
     local function status(value,message,short)
         K.Status=value;K.StatusText=short or value;K.message=message or value
@@ -1678,14 +1723,15 @@ do
     function K.Release(message,reason)
         local short
         if K.target then
-            local _,_,root=character();local cam=workspace.CurrentCamera
+            local char,hum,root=character();local cam=workspace.CurrentCamera
             reason=reason or "reset"
             K.LastRelease={message=message or "Alvo solto",reason=reason,at=os.clock(),
                 cameraType=cam and cam.CameraType.Name or "none",
                 nativeCameraType=K.saved and K.saved.kind.Name or nil,suspended=K.suspended,
-                distance=root and (K.target.root.Position-root.Position).Magnitude or nil,
+                distance=root and (bodyPosition(K.target.char,K.target.hum,K.target.root)-bodyPosition(char,hum,root)).Magnitude or nil,
                 captureRadius=cfg.radius,releaseRange=math.max(cfg.radius,cfg.lockReleaseRange),
-                health=K.target.hum and K.target.hum.Health or nil,recoveries=K.CameraRecoveries or 0}
+                health=K.target.hum and K.target.hum.Health or nil,recoveries=K.CameraRecoveries or 0,
+                occlusion=reason=="occluded" and K.LastOcclusion or nil}
             local labels={manual="SOLTO",camera="CAMERA",reset="REINICIADO",character="RESPAWN",parts="CORPO",dead="ALVO MORTO",left="SAIU",team="TIME",range="ALCANCE",occluded="PAREDE",localCharacter="PERSONAGEM",config="AJUSTE"}
             short=labels[reason] or "PRONTO"
             if reason=="range" and K.LastRelease.distance then short=string.format("ALCANCE %.1f/%.0f",K.LastRelease.distance,K.LastRelease.releaseRange) end
@@ -1701,7 +1747,7 @@ do
         K.classicPaused=true
         K.Release(message,reason or "reset")
     end
-    local function liveTarget(target,localRoot)
+    local function liveTarget(target,localPosition)
         if not target or target.player.Parent~=Players then return false,"left" end
         if target.player.Character~=target.char then return false,"character" end
         local a=actor(target.player)
@@ -1710,22 +1756,26 @@ do
         if cfg.teamCheck and sameTeam(target.player) then return false,"team" end
         -- A rebuilt root/humanoid inside the same character is still the same selected opponent.
         target.hum=a.hum;target.root=a.root;state.aimTarget=a.root
-        return (a.root.Position-localRoot.Position).Magnitude<=math.max(cfg.radius,cfg.lockReleaseRange),"range"
+        target.position=bodyPosition(a.char,a.hum,a.root)
+        return (target.position-localPosition).Magnitude<=math.max(cfg.radius,cfg.lockReleaseRange),"range"
     end
     function K.Pick(cam,localChar,localRoot)
         local best,bestScore,bestDistance
         local view=cam.ViewportSize
         if view.X<=0 or view.Y<=0 then return end
+        local localPosition=bodyPosition(localChar,actor(player).hum,localRoot)
         filters(localChar)
         for _,p in ipairs(roster) do
             if p~=player and p.Parent==Players and not (cfg.teamCheck and sameTeam(p)) then
                 local a=actor(p)
                 if a.char and a.hum and a.hum.Health>0 and a.root and a.root.Parent==a.char then
-                    local distance=(a.root.Position-localRoot.Position).Magnitude
+                    local targetPosition=bodyPosition(a.char,a.hum,a.root)
+                    local distance=(targetPosition-localPosition).Magnitude
                     if distance<=cfg.radius then
-                        local point,onScreen=cam:WorldToViewportPoint(a.root.Position+Vector3.new(0,0.5,0))
+                        local aimPoint=targetPosition+Vector3.new(0,0.5,0)
+                        local point,onScreen=cam:WorldToViewportPoint(aimPoint)
                         if onScreen and point.Z>0.1 then
-                            if not cfg.lockWallCheck or clearSight(cam.CFrame.Position,a.root.Position+Vector3.new(0,0.5,0)) then
+                            if not cfg.lockWallCheck or visibleBody(cam.CFrame.Position,a.char,aimPoint) then
                                 local x,y=(point.X-view.X*0.5)/view.X,(point.Y-view.Y*0.5)/view.Y
                                 local score=x*x+y*y
                                 if not bestScore or score<bestScore-0.000001 or (math.abs(score-bestScore)<=0.000001 and distance<bestDistance) then
@@ -1756,7 +1806,7 @@ do
         K.target=target;K.localCharacter=char;state.aimTarget=target.root
         K.ClearLook()
         K.saved={camera=cam,kind=cam.CameraType,subject=cam.CameraSubject};K.acquiredAt=os.clock();K.fadeAt=nil
-        K.CameraRecoveries=0;K.LastRecovery=nil;K.LastPause=nil;K.rig=nil
+        K.CameraRecoveries=0;K.LastRecovery=nil;K.LastPause=nil;K.LastOcclusion=nil;K.rig=nil
         K.heading=Vector3.new(cam.CFrame.LookVector.X,0,cam.CFrame.LookVector.Z)
         if K.heading.Magnitude<0.01 then K.heading=Vector3.new(0,0,-1) else K.heading=K.heading.Unit end
         filters(char,target.char);K.losClock=0;K.occludedAt=nil
@@ -1874,14 +1924,11 @@ do
         local look=Vector3.new(point.X,root.Position.Y,point.Z)
         if (look-root.Position).Magnitude>0.1 then root.CFrame=CFrame.lookAt(root.Position,look) end
     end
-    local function pauseCamera(reason)
-        if K.suspended~=reason then
-            K.suspended=reason;K.ClearLook();K.rig=nil;K.occludedAt=nil;K.losClock=0
-            local cam=workspace.CurrentCamera;local _,hum,root=character()
-            K.LastPause={reason=reason,at=os.clock(),cameraType=cam and cam.CameraType.Name or "none",
-                subjectClass=cam and cam.CameraSubject and cam.CameraSubject.ClassName or "none",
-                subjectIsLocal=not not (cam and hum and root and cameraSubjectIsLocal(cam,hum,root))}
-            status("PAUSADO","Camera temporaria do jogo; alvo mantido",reason=="subject" and "PAUSA: CENA" or "PAUSA: CAMERA")
+    local function waitForCamera()
+        if not K.suspended then
+            K.suspended="missing";K.ClearLook();K.rig=nil
+            K.LastPause={reason="missing",at=os.clock(),cameraType="none"}
+            status("SEM CAMERA","Aguardando CurrentCamera; alvo mantido")
         end
         marker.Visible=false
     end
@@ -1889,7 +1936,8 @@ do
         if cfg.lockMode=="Classico" then K.Reset("Camera trocada; retome o acompanhamento","camera");return end
         if not K.target then K.ClearLook();return end
         restoreCamera()
-        pauseCamera("camera")
+        K.rig=nil;K.ClearLook()
+        if not workspace.CurrentCamera then waitForCamera() end
     end
     function K.Step(dt,cam,hum,root)
         if not cfg.lockOn or state.booting or not root or not hum or hum.Health<=0 then
@@ -1918,43 +1966,47 @@ do
         local target=K.target
         if not target then hideMarker(dt,cam);return end
         if player.Character~=K.localCharacter then K.Release("Personagem trocado; escolha o alvo novamente","character");hideMarker(dt,cam);return end
-        local validTarget,reason=liveTarget(target,root)
+        local localPosition=bodyPosition(K.localCharacter,hum,root)
+        local validTarget,reason=liveTarget(target,localPosition)
         if not validTarget then K.Release("Alvo fora das condicoes; aperte para escolher outro",reason);hideMarker(dt,cam);return end
-        if not cam then pauseCamera("camera");return end
-        if K.saved and cam~=K.saved.camera then restoreCamera() end
+        if not cam then waitForCamera();return end
+        if K.saved and cam~=K.saved.camera then restoreCamera();K.rig=nil end
         if not K.saved then
-            if not normalCameraType(cam.CameraType) or not cameraSubjectIsLocal(cam,hum,root) then pauseCamera("camera");return end
-            -- Claim a replacement camera only after the game returns it to a normal local view.
+            -- An active explicit lock owns the view through combat camera/subject changes.
             K.saved={camera=cam,kind=cam.CameraType,subject=cam.CameraSubject}
         end
-        if not cameraSubjectIsLocal(cam,hum,root) then pauseCamera("subject");return end
         if cam.CameraType~=Enum.CameraType.Scriptable then
-            if normalCameraType(cam.CameraType) then
-                -- Track/Follow can also be normal local gameplay, not cutscenes.
-                K.saved.kind=cam.CameraType
-                K.LastRecovery={cameraType=cam.CameraType.Name,at=os.clock()}
-                cam.CameraType=Enum.CameraType.Scriptable
-                K.CameraRecoveries=K.CameraRecoveries+1;K.lastRecoveryAt=os.clock()
-            else
-                pauseCamera("type");return
-            end
+            K.saved.kind=cam.CameraType
+            K.LastRecovery={cameraType=cam.CameraType.Name,at=os.clock(),
+                subjectIsLocal=not not cameraSubjectIsLocal(cam,hum,root)}
+            cam.CameraType=Enum.CameraType.Scriptable
+            K.CameraRecoveries=K.CameraRecoveries+1;K.lastRecoveryAt=os.clock()
         end
         if K.suspended then
             K.suspended=nil;K.acquiredAt=os.clock()
             status("TRAVADO","Alvo: "..target.player.DisplayName.." | aperte para soltar")
         end
-        local point=target.root.Position+Vector3.new(0,0.5,0)
+        local point=target.position+Vector3.new(0,0.5,0)
         K.losClock=K.losClock+dt
         if K.losClock>=0.1 then
             K.losClock=0
             filters(K.localCharacter,target.char)
-            if cfg.lockWallCheck and not clearSight(root.Position+Vector3.new(0,1.5,0),point) then K.occludedAt=K.occludedAt or os.clock()
+            if cfg.lockWallCheck then
+                local visible,hit=combatVisible(K.localCharacter,localPosition,target.char,point)
+                if not visible then
+                    if not K.occludedAt then
+                        K.LastOcclusion={at=os.clock(),blocker=hit and hit.Instance and hit.Instance.Name or "unknown",
+                            blockerClass=hit and hit.Instance and hit.Instance.ClassName or "unknown",
+                            normalY=hit and hit.Normal and hit.Normal.Y or nil}
+                    end
+                    K.occludedAt=K.occludedAt or os.clock()
+                else K.occludedAt=nil end
             else K.occludedAt=nil end
         end
         if K.occludedAt and os.clock()-K.occludedAt>=0.65 then K.Release("Alvo encoberto; aperte para escolher outro","occluded");hideMarker(dt,cam);return end
-        local frame,focus=K.Solve(root.Position+Vector3.new(0,1,0),point,cam,dt)
+        local frame,focus=K.Solve(localPosition+Vector3.new(0,1,0),point,cam,dt)
         cam.CFrame=frame;cam.Focus=CFrame.new(focus)
-        face(root,hum,point);K.Draw(cam,point,(target.root.Position-root.Position).Magnitude)
+        face(root,hum,point);K.Draw(cam,point,(target.position-localPosition).Magnitude)
     end
     function K.CancelBind()
         K.binding=false
@@ -3099,7 +3151,7 @@ function API.CopyLockDiagnostics()
         cameraRecoveries=k.CameraRecoveries or 0,suspended=k.suspended,
         cameraType=cam and cam.CameraType.Name or "none",
         cameraSubjectClass=cam and cam.CameraSubject and cam.CameraSubject.ClassName or "none",
-        lastRecovery=k.LastRecovery,lastPause=k.LastPause}
+        lastRecovery=k.LastRecovery,lastPause=k.LastPause,lastOcclusion=k.LastOcclusion}
     return presentDiagnostic(Http:JSONEncode(report),"Motivo do Lock On copiado.")
 end
 
