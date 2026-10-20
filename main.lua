@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.11
+-- Huss Valley Panel 0.6.12
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -20,6 +20,7 @@ local defaults = {
     movement=false, speedBoost=false, walkSpeed=24, fly=false, flySpeed=50,
     noclip=false, tpWalk=false, tpSpeed=16, infiniteJump=false, spin=false, spinSpeed=120,
     autoJumpButton=false, freezeButton=false, autoJumpInterval=0.15, freezeDuration=0.12, freezeCooldown=1,
+    resizeJumpButton=false, jumpButtonScale=1.5,
     firstPerson=false, unlockMouse=false, fov=70, customFov=false, fullbright=false, xray=false,
     lockOn=false, radius=30, prediction=0.12, aimSmooth=12, faceTarget=false, teamCheck=false,
     lockMode="Console", lockButton=false, lockKey="L", lockReleaseRange=80, lockWallCheck=true,
@@ -47,7 +48,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.11", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.12", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -338,7 +339,7 @@ local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,36
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
     shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85},
-    autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5}}
+    autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5},jumpButtonScale={0.5,3}}
 local function valid(key,value,keyContext)
     keyContext=keyContext or cfg
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
@@ -914,6 +915,10 @@ left,right=page("World",5)
 do
     local content=card(left,"Auto Jump","autoJumpButton","Liga o botao flutuante. Toque nele para iniciar ou parar os saltos; arraste para reposicionar.")
     slider(content,"Intervalo dos saltos","autoJumpInterval",0.1,1,0.05,"s")
+    content=card(left,"Botao de pulo (Roblox)","resizeJumpButton","Ajusta o tamanho do botao nativo no celular. Desligar restaura o tamanho e a posicao originais.")
+    slider(content,"Escala do botao","jumpButtonScale",0.5,3,0.05,"x")
+    API.JumpButtonSizeStatus=text(content,"Status: desligado",9,{Size=UDim2.new(1,0,0,30),TextWrapped=true})
+    actionButton(content,"Restaurar tamanho original",function() set("resizeJumpButton",false) end)
     content=card(left,"Freeze","freezeButton","Liga o botao flutuante para uma travada curta da tela/jogo e retorno automatico.")
     slider(content,"Duracao da travada","freezeDuration",0.05,3,0.01,"s")
     slider(content,"Intervalo entre usos","freezeCooldown",0.5,5,0.25,"s")
@@ -1176,6 +1181,110 @@ local function bindCameraSize()
     if cam then cameraSizeConnection=cam:GetPropertyChangedSignal("ViewportSize"):Connect(fit) end
 end
 bindCameraSize();listen(workspace:GetPropertyChangedSignal("CurrentCamera"),bindCameraSize)
+
+-- Native mobile jump-button geometry only; its visibility and touch handlers remain owned by Roblox.
+do
+    local J={generation=0,connections={}}
+    API.JumpButtonSize=J
+    local function status(message)
+        if API.JumpButtonSizeStatus.Text~=message then API.JumpButtonSizeStatus.Text=message end
+    end
+    local function disconnect(list)
+        for _,connection in ipairs(list) do connection:Disconnect() end
+    end
+    local function nativeButton()
+        local pg=player:FindFirstChildOfClass("PlayerGui")
+        local touch=pg and pg:FindFirstChild("TouchGui")
+        local frame=touch and touch:FindFirstChild("TouchControlFrame")
+        local button=frame and frame:FindFirstChild("JumpButton")
+        if button and button:IsA("GuiButton") then return button end
+    end
+    function J.Release()
+        local record=J.record;J.record=nil
+        if not record then return end
+        disconnect(record.connections)
+        pcall(function()
+            -- Preserve a newer external edit if it has not been observed yet.
+            if record.button.Size==record.appliedSize then record.button.Size=record.size end
+            if record.button.Position==record.appliedPosition then record.button.Position=record.position end
+        end)
+    end
+    function J.Apply()
+        local r=J.record
+        if not r or not r.button.Parent then return end
+        local parent=r.button.Parent
+        local view=parent.AbsoluteSize
+        local width=r.size.X.Scale*view.X+r.size.X.Offset
+        local height=r.size.Y.Scale*view.Y+r.size.Y.Offset
+        if view.X<=0 or view.Y<=0 or width<=0 or height<=0 then status("Status: aguardando tamanho da tela");return end
+        local scale=math.min(cfg.jumpButtonScale,view.X/width,view.Y/height)
+        local anchor=r.button.AnchorPoint
+        local newWidth,newHeight=width*scale,height*scale
+        local x=r.position.X.Scale*view.X+r.position.X.Offset+(0.5-anchor.X)*(width-newWidth)
+        local y=r.position.Y.Scale*view.Y+r.position.Y.Offset+(0.5-anchor.Y)*(height-newHeight)
+        if scale~=1 then
+            x=math.clamp(x,anchor.X*newWidth,math.max(anchor.X*newWidth,view.X-(1-anchor.X)*newWidth))
+            y=math.clamp(y,anchor.Y*newHeight,math.max(anchor.Y*newHeight,view.Y-(1-anchor.Y)*newHeight))
+        end
+        local size=UDim2.new(r.size.X.Scale*scale,r.size.X.Offset*scale,r.size.Y.Scale*scale,r.size.Y.Offset*scale)
+        local position=UDim2.new(r.position.X.Scale,x-r.position.X.Scale*view.X,r.position.Y.Scale,y-r.position.Y.Scale*view.Y)
+        r.appliedSize=size;r.appliedPosition=position;r.writing=true
+        if r.button.Size~=size then r.button.Size=size end
+        if r.button.Position~=position then r.button.Position=position end
+        r.writing=false
+        status(string.format("Status: %.2fx | %.0f x %.0f px",scale,newWidth,newHeight))
+    end
+    function J.Queue()
+        if J.queued or not J.running then return end
+        J.queued=true;local generation=J.generation
+        task.defer(function()
+            if generation~=J.generation then return end
+            J.queued=false
+            if state.alive and J.running then J.Refresh() end
+        end)
+    end
+    function J.Refresh()
+        local button=nativeButton()
+        if not J.record or J.record.button~=button then
+            J.Release()
+            if button then
+                local r={button=button,size=button.Size,position=button.Position,connections={}}
+                J.record=r
+                local function geometry(property)
+                    if r.writing or J.record~=r then return end
+                    if property=="Size" and button.Size~=r.appliedSize then r.size=button.Size end
+                    if property=="Position" and button.Position~=r.appliedPosition then r.position=button.Position end
+                    J.Queue()
+                end
+                r.connections={button:GetPropertyChangedSignal("Size"):Connect(function() geometry("Size") end),
+                    button:GetPropertyChangedSignal("Position"):Connect(function() geometry("Position") end),
+                    button:GetPropertyChangedSignal("AnchorPoint"):Connect(J.Queue),
+                    button.Parent:GetPropertyChangedSignal("AbsoluteSize"):Connect(J.Queue)}
+            end
+        end
+        if J.record then J.Apply() else status("Status: aguardando botao nativo de pulo") end
+    end
+    function J.Stop()
+        J.running=false;J.generation=J.generation+1;J.queued=false
+        disconnect(J.connections);J.connections={};J.Release()
+        status("Status: desligado")
+    end
+    function J.Configure()
+        if not state.alive or not cfg.resizeJumpButton then J.Stop();return end
+        if not Input.TouchEnabled then J.Stop();status("Status: disponivel em dispositivos com toque");return end
+        if not J.running then
+            J.running=true
+            local function changed(object)
+                if object.Name=="JumpButton" or object.Name=="TouchControlFrame" or object.Name=="TouchGui" or object:IsA("PlayerGui") then J.Queue() end
+            end
+            J.connections={player.DescendantAdded:Connect(changed),player.DescendantRemoving:Connect(changed)}
+        end
+        J.Refresh()
+    end
+    actions.resizeJumpButton=J.Configure;actions.jumpButtonScale=J.Configure
+    listen(Input:GetPropertyChangedSignal("TouchEnabled"),function() if cfg.resizeJumpButton then J.Configure() end end)
+end
+-- End native jump-button sizing.
 
 -- Visual performance changes are cancellable, batched, and reversible.
 local perfToken,perfQueued,perfCache=0,false,nil
@@ -3866,6 +3975,7 @@ function API.Destroy()
     if API.UI then API.UI.Stop() end
     if API.Loading then API.Loading.Stop() end
     if API.QuickActions then API.QuickActions.Stop() end
+    if API.JumpButtonSize then API.JumpButtonSize.Stop() end
     if API.LockOn then API.LockOn.Stop() end
     if API.ConfigUI then API.ConfigUI.Stop() end
     for input in pairs(pointerSessions) do pointerSessions[input]=nil end

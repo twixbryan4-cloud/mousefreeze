@@ -1,6 +1,16 @@
 # Huss Valley Panel
 
-Versão 0.6.11 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.12 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Tamanho do botão de pulo nativo na versão 0.6.12
+
+Em **World > Botao de pulo (Roblox)**, ligue o ajuste e use **Escala do botao**, entre 0,5x e 3x em passos de 0,05. Ao ligar pela primeira vez, usa 1,5x. A opção começa desligada; editar a escala com ela desligada só guarda a preferência. Os dois valores entram nos perfis já existentes. Desligar ou acionar **Restaurar tamanho original** devolve a geometria nativa guardada. Encerrar ou executar novamente o painel também restaura o botão.
+
+O controlador modifica Size e Position do próprio JumpButton localizado em PlayerGui/TouchGui/TouchControlFrame. A área nativa de toque cresce com o botão. Não cria outro controle, não simula saltos e não altera eventos de entrada, Visible, Active, TouchGui.Enabled, estados do Humanoid ou o analógico de movimento. O centro original é preservado quando há espaço; se o aumento ultrapassaria as bordas, a posição é ajustada para caber. Em telas pequenas, a escala efetiva pode ser limitada pelo espaço disponível e aparece no status.
+
+A descoberta e reaplicação usam eventos de criação/remoção de controles e mudanças de geometria. Recriação do botão ou de PlayerGui, respawn e mudança de orientação são tratados sem uma consulta por quadro. Escritas externas de tamanho/posição atualizam a base antes de reaplicar, evitando multiplicar repetidamente o próprio tamanho ajustado. Tarefas adiadas antigas são invalidadas ao desligar. Se o controle nativo estiver ausente, o status aguarda sua criação. A função só aplica alterações em dispositivos com suporte a toque; o jogo continua decidindo quando o botão aparece.
+
+A integração foi revisada contra o [TouchJump publicado pela Roblox](https://github.com/Roblox/avatar/blob/main/ReferenceBodyCreator/StarterPlayerScripts/PlayerModule/ControlModule/TouchJump.lua) e as propriedades oficiais de [posição e tamanho de GUI](https://create.roblox.com/docs/ui/position-and-size). Essa referência não garante que jogos com controles próprios usem a mesma estrutura. O arquivo completo compilou no Luau oficial 0.741, e as 709 asserções de regressão existentes passaram. Lock On, FPS e shaders foram comparados sem alterações de código. As regressões não exercitam o novo botão nativo em um cliente Roblox; a aparência, a área de toque e a recriação real do controle ainda precisam ser confirmadas no aparelho. O mesmo loader continua válido; o rodapé identifica v0.6.12.
 
 ## Acompanhamento de quedas e visibilidade do corpo na versão 0.6.11
 
