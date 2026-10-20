@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.4
+-- Huss Valley Panel 0.6.5
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -33,7 +33,7 @@ local defaults = {
     hitbox=false, leaderboard=false, gems=false,
     fpsBoost=false, removeTextures=true, removeDecals=true, removeParticles=true,
     lowDetail=true, noShadows=true, noFog=true, removeAccessories=false,
-    unlockFPS=false, fpsCap=120, lowQuality=false,
+    unlockFPS=false, fpsCap=120, fpsUnlimited=false, lowQuality=false,
     shaders=false, shaderFloors=true, shaderWalls=true, shaderPolish=false, shaderShadows=true,
     shaderReflection=0.28, shaderWallReflection=0.14, shaderContrast=0.14, shaderSaturation=-0.06,
     shaderExposure=0.05, shaderBloom=0.12, shaderTemperature=0,
@@ -46,7 +46,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.4", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.5", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -359,7 +359,7 @@ set=function(key,value,quiet)
         if not quiet then notify(key=="antiHit" and "Anti-Hit ainda nao validado: falta confirmar como o servidor aplica os hits." or "Essa funcao ainda precisa de integracao com o Huss Valley.") end
         return false
     end
-    if key=="unlockFPS" and newValue and type(setfpscap)~="function" then notify("Esta versao do executor nao fornece setfpscap."); return false end
+    if key=="unlockFPS" and newValue and type(setfpscap)~="function" and type(env.setfpscap)~="function" then notify("Esta versao do executor nao fornece setfpscap."); return false end
     if cfg[key]==newValue then return true end
     cfg[key]=newValue
     for _,fn in ipairs(watchers[key] or {}) do fn(newValue) end
@@ -936,8 +936,12 @@ local perfStatus=text(perfContent,"Status: off",9)
 for _,v in ipairs({{"Remove Textures","removeTextures"},{"Remove Decals","removeDecals"},{"Remove Particles & Effects","removeParticles"},
     {"Low-Detail Materials","lowDetail"},{"Disable Shadows","noShadows"},{"No Fog & Atmosphere","noFog"},{"Remove Accessories","removeAccessories"}}) do checkbox(perfContent,v[1],v[2]) end
 actionButton(perfContent,"Restore Graphics",function() set("fpsBoost",false);set("lowQuality",false) end);perfExpand()
-c=card(right,"Display & Quality",nil,"FPS cap so aparece como ativo se o executor fornecer a API. O desempenho depende do aparelho e do jogo.")
-checkbox(c,"Low render quality","lowQuality");checkbox(c,"Unlock FPS","unlockFPS");slider(c,"FPS Cap","fpsCap",30,240,10," fps")
+c=card(right,"Display & Quality",nil,"Escolha o limite e use Aplicar limite. O pedido ao executor e o FPS real aparecem separados; o aparelho e o cliente determinam o resultado.")
+checkbox(c,"Low render quality","lowQuality");checkbox(c,"Unlock FPS","unlockFPS")
+slider(c,"FPS Cap","fpsCap",30,240,1," fps");checkbox(c,"Sem limite","fpsUnlimited")
+API.FPSStatus=text(c,"Desligado",9,{TextWrapped=true,Size=UDim2.new(1,0,0,46)})
+API.FPSReadout=text(c,"Real: -- FPS | quadro: -- ms",9,{TextWrapped=true,Size=UDim2.new(1,0,0,30)})
+actionButton(c,"Aplicar limite",function() if API.FPS then API.FPS.ApplySelected() end end)
 
 left,right=page("Emotes",9)
 local emoteContent,emoteExpand=card(left,"Avatar Emotes",nil,"Lista os emotes que ja estao equipados no seu avatar. A disponibilidade depende do rig e das animacoes carregadas.")
@@ -1202,15 +1206,125 @@ actions.lowQuality=function(v)
         assert(patch("quality",UserSettings():GetService("UserGameSettings"),"SavedQualityLevel",Enum.SavedQualitySetting.QualityLevel1),"Qualidade grafica protegida nesta versao.")
     end
 end
-local originalFPS
-if type(getfpscap)=="function" then local ok,v=pcall(getfpscap);if ok and type(v)=="number" then originalFPS=v end end
-local function applyFPS()
-    if cfg.unlockFPS then setfpscap(cfg.fpsCap)
-    elseif state.capChanged and originalFPS then setfpscap(originalFPS)
-    elseif state.capChanged then notify("O executor nao informa o limite anterior. Ajuste o FPS nas configuracoes do Roblox.") end
-    state.capChanged=cfg.unlockFPS
+-- FPS requests and rendered FPS are independent: never present the requested cap as measured performance.
+do
+    local F={running=false,changed=false,captured=false,attempts=0,lastWrite=-math.huge,message="Desligado",Stats={}}
+    API.FPS=F
+    local function validCap(value) return type(value)=="number" and value==value and value>=0 and value<math.huge end
+    local function setter()
+        if type(setfpscap)=="function" then return setfpscap end
+        if type(env.setfpscap)=="function" then return env.setfpscap end
+    end
+    local function reader()
+        if type(getfpscap)=="function" then return getfpscap end
+        if type(env.getfpscap)=="function" then return env.getfpscap end
+    end
+    local function capText(value) return value==0 and "sem limite" or value and string.format("%.0f",value) or "sem leitura" end
+    local function matches(a,b) return a~=nil and b~=nil and ((a==0 and b==0) or (a>0 and b>0 and math.abs(a-b)<0.5)) end
+    function F.ReadCap()
+        local fn=reader();if not fn then return end
+        local ok,value=pcall(fn);if ok and validCap(value) then return value end
+    end
+    local function callSetter(value)
+        local fn=setter();if not fn then return false,"setfpscap indisponivel" end
+        local ok,result=pcall(fn,value)
+        if not ok or result==false then return false,ok and "API recusou o pedido" or tostring(result) end
+        return true
+    end
+    function F.Refresh()
+        F.Stats.requested=F.running and F.desired or nil;F.Stats.reported=F.reported
+        F.Stats.measured=F.measured;F.Stats.frameMs=F.frameMs;F.Stats.message=F.message
+        F.Stats.attempts=F.attempts;F.Stats.blocked=F.blocked==true
+        if not state.alive then return end
+        local message=F.message
+        if F.running then message=message.."\nPedido: "..capText(F.desired).." | API: "..capText(F.reported) end
+        if API.FPSStatus.Text~=message then API.FPSStatus.Text=message end
+        local measured=F.measured and string.format("Real: %.0f FPS | quadro: %.1f ms",F.measured,F.frameMs) or "Real: -- FPS | quadro: -- ms"
+        if API.FPSReadout.Text~=measured then API.FPSReadout.Text=measured end
+    end
+    function F.Write(clearFirst)
+        F.attempts=F.attempts+1;F.lastWrite=os.clock();F.stableSince=nil
+        if not setter() then F.error="setfpscap indisponivel";F.message="Executor sem API de FPS";F.blocked=true;F.reported=F.ReadCap();F.Refresh();return false end
+        if not F.captured then F.original=F.ReadCap();F.captured=true end
+        F.changed=true;state.capChanged=true
+        local cleared,beforeClear=false,nil
+        if clearFirst and F.desired~=0 then beforeClear=F.ReadCap();cleared=callSetter(0) end
+        local ok,reason=callSetter(F.desired)
+        F.error=not ok and reason or nil
+        if not ok and cleared then
+            local previous=beforeClear~=nil and beforeClear or F.original
+            if previous~=nil then callSetter(previous) end
+        end
+        F.reported=F.ReadCap()
+        if not ok then F.message="Falha ao pedir FPS ao executor"
+        elseif matches(F.reported,F.desired) then F.message="Limite informado pela API confirmado"
+        elseif F.reported~=nil then F.message="API ainda informa outro limite"
+        else F.message="Pedido enviado; API sem confirmacao de leitura" end
+        F.Refresh();return ok
+    end
+    function F.Stop()
+        F.running=false;F.blocked=false;F.stableSince=nil
+        if F.changed then
+            local current=F.ReadCap()
+            if current~=nil and F.desired~=nil and not matches(current,F.desired) then
+                F.message="Desligado; limite atual preservado"
+            elseif F.original~=nil then
+                local ok=callSetter(F.original)
+                if not ok then F.message="Falha ao restaurar limite anterior";F.Refresh();return false end
+                F.message="Desligado; limite anterior restaurado"
+            else
+                F.message="Desligado; limite anterior desconhecido"
+                if state.alive then notify("Sem getfpscap valido: ajuste o limite anterior no Roblox/Delta.") end
+            end
+        else F.message="Desligado" end
+        F.changed=false;F.captured=false;F.original=nil;F.reported=F.ReadCap();state.capChanged=false
+        F.Refresh();return true
+    end
+    function F.Configure(force)
+        if not state.alive then return false end
+        if not cfg.unlockFPS then
+            if F.running or F.changed then return F.Stop() end
+            F.Refresh();return true
+        end
+        local desired=cfg.fpsUnlimited and 0 or math.floor(cfg.fpsCap+0.5)
+        if not force and F.running and F.desired==desired then F.Refresh();return true end
+        F.running=true;F.desired=desired;F.attempts=0;F.blocked=false;F.stableSince=nil
+        return F.Write(false)
+    end
+    function F.ApplySelected()
+        if not cfg.unlockFPS then
+            if not set("unlockFPS",true) then F.message="Executor sem API de FPS";F.Refresh();return false end
+            return F.error==nil and F.running
+        end
+        return F.Configure(true)
+    end
+    function F.Observe(frames,elapsed)
+        if not state.alive then return end
+        if frames>0 and elapsed>0 then F.measured=frames/elapsed;F.frameMs=elapsed*1000/frames end
+        if F.running and cfg.unlockFPS then
+            F.reported=F.ReadCap();local now=os.clock()
+            if matches(F.reported,F.desired) then
+                F.blocked=false
+                F.message=F.desired>0 and F.measured and F.measured<F.desired*0.9 and "API confirma o limite; FPS real abaixo do alvo" or "Limite informado pela API confirmado"
+                F.stableSince=F.stableSince or now
+                if now-F.stableSince>=5 then F.attempts=0 end
+            elseif F.reported~=nil then
+                F.stableSince=nil
+                if F.attempts>=3 then F.blocked=true;F.message="API continua em outro limite apos 3 tentativas"
+                elseif now-F.lastWrite>=1.5 then F.Write(true) end
+            else
+                F.message=F.error and "Falha ao pedir FPS ao executor" or "Pedido enviado; API sem confirmacao de leitura"
+            end
+        end
+        F.Refresh()
+    end
+    actions.unlockFPS=function() F.Configure(false) end
+    actions.fpsCap=function() F.Configure(false) end
+    actions.fpsUnlimited=function() F.Configure(false) end
+    listen(Input.WindowFocused,function() if state.alive and cfg.unlockFPS then F.Configure(true) end end)
+    F.Refresh()
 end
-actions.unlockFPS=applyFPS;actions.fpsCap=function() if cfg.unlockFPS then applyFPS() end end
+-- End FPS controller.
 
 -- Native shader look: persistent across streamed/replaced maps, with no scene clones.
 do
@@ -3212,7 +3326,10 @@ Run:BindToRenderStep(renderBindingName,Enum.RenderPriority.Camera.Value+1,functi
         end
     end
     renderESP(dt) -- project current poses after all camera changes, without positional interpolation.
-    if state.time>=0.75 then fpsLabel.Text=string.format("%d FPS",math.floor(state.frames/state.time+0.5));state.frames=0;state.time=0 end
+    if state.time>=0.75 then
+        fpsLabel.Text=string.format("%d FPS",math.floor(state.frames/state.time+0.5))
+        API.FPS.Observe(state.frames,state.time);state.frames=0;state.time=0
+    end
 end)
 listen(player.CharacterAdded,function()
     stopFlight();restore("speed");restore("collision");restore("headless");restore("nameHider")
@@ -3234,6 +3351,7 @@ function API.Destroy()
     if API.ConfigUI then API.ConfigUI.Stop() end
     for input in pairs(pointerSessions) do pointerSessions[input]=nil end
     if API.Shaders then API.Shaders.Stop() end
+    if API.FPS then API.FPS.Stop() end
     endHitTrace("panelClosed",false)
     if API.Native and API.Native.ReleaseDashInput then API.Native.ReleaseDashInput() end
     for key,name in pairs(requiresAdapter) do if cfg[key] and type(adapters[name])=="function" then pcall(adapters[name],{Enabled=false,Player=player,Config=cfg}) end end
@@ -3243,7 +3361,6 @@ function API.Destroy()
     if collisionConnection then collisionConnection:Disconnect();collisionConnection=nil end
     stopFlight();API.StopEmote()
     for group in pairs(originals) do restore(group) end
-    if state.capChanged and originalFPS and type(setfpscap)=="function" then pcall(setfpscap,originalFPS) end
     for p in pairs(espRecords) do clearRecord(p) end
     visuals:Destroy();gui:Destroy()
     if env.HussValleyPanel==API then env.HussValleyPanel=nil end

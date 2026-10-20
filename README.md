@@ -1,6 +1,24 @@
 # Huss Valley Panel
 
-Versão 0.6.4 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.5 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Controle e verificação de FPS na versão 0.6.5
+
+Em **Performance > Display & Quality**, selecione o FPS Cap e toque em **Aplicar limite**. Esse botão também liga Unlock FPS quando estava desligado; antes, editar o seletor com o recurso desligado apenas guardava o valor. O seletor agora permite incrementos de 1 FPS entre 30 e 240, incluindo 120, 144 e 240. **Sem limite** é uma opção independente que envia `setfpscap(0)`, conforme a convenção da API. Desmarcá-la com Unlock FPS ligado reaplica o limite finito selecionado. Os perfis existentes mantêm suas escolhas; a opção nova começa desligada.
+
+O painel separa **Pedido**, **API** e **Real**. Pedido é o limite desejado; API é a leitura de `getfpscap`, quando existe e retorna um número válido; Real é a quantidade de callbacks de renderização dividida pelo tempo acumulado desses quadros. A duração média do quadro também aparece em milissegundos. O contador do rodapé continua medindo quadros reais; não foi substituído pelo número selecionado. Uma API informando 120 com renderização medida em 60 aparece explicitamente como FPS real abaixo do alvo, sem reescrever o limite por esse motivo.
+
+As funções `setfpscap` e `getfpscap` podem estar no ambiente global ou em getgenv. Erros, retorno false do setter, leitor ausente e valores inválidos são tratados separadamente. A presença de uma função não é anunciada como prova de FPS desbloqueado. Sem leitura válida, a interface informa que o pedido foi enviado sem confirmação.
+
+O acompanhamento reutiliza a atualização do contador a cada aproximadamente 0,75 segundo. Se a leitura mostrar outro limite, aguarda ao menos 1,5 segundo entre tentativas. Nas tentativas seguintes, pode pedir zero antes de reaplicar o alvo finito para limpar um limitador anterior. Há no máximo três tentativas consecutivas; depois, mostra que a API continua em outro limite e suspende novas escritas automáticas. Cinco segundos de leituras estáveis reiniciam essa contagem. Aplicar limite manualmente e retornar o foco à janela permitem uma nova solicitação explícita ou uma recuperação do limite. Sem getter, não existe repetição cega de escritas. Uma taxa real baixa, sozinha, nunca provoca reconfiguração.
+
+O limite anterior é lido imediatamente antes da primeira alteração, incluindo zero como valor válido. Desligar ou destruir o painel restaura esse valor quando ele é conhecido; um limite externo diferente do pedido atual é preservado. Se uma tentativa de limpar o limite funcionar mas o pedido final falhar, é tentado o retorno ao valor lido antes dessa limpeza. Sem leitura válida do limite anterior, o painel informa a impossibilidade de restauração exata e não inventa um fallback de 60 FPS. Abrir o painel com Unlock FPS desligado não escreve nenhum limite.
+
+Esse controlador usa a API de FPS oferecida pelo executor. Ele não substitui o renderizador nem garante uma taxa sustentada de 120/240 no aparelho. O valor escolhido é um teto; o FPS medido também depende do cliente, da carga gráfica e das condições do dispositivo. FPS Booster, qualidade, shaders e demais funções não são alterados automaticamente por esse controle. Evite manter dois controladores de FPS ajustando o mesmo limite ao mesmo tempo.
+
+A sintaxe completa, 56 verificações específicas de FPS e as 56 verificações da correção de entradas da 0.6.4 passaram, além da reprodução do bug antigo com 3 asserções. Os casos de FPS cobrem aplicação com checkbox desligado, 60/120/144/240, zero, perfis idempotentes, leitura incompatível, repetição limitada, API ausente, funções em getgenv, retorno false, exceções, captura e restauração do limite anterior, preservação de alteração externa, retorno de foco e encerramento. São testes com APIs simuladas; não medem o comportamento da API do Delta nem o FPS no celular.
+
+Referências de comportamento: [convenção setfpscap, incluindo zero](https://github.com/unified-naming-convention/NamingStandard/blob/main/api/misc.md#setfpscap) e [documentação de avaliação de frame rate do Roblox](https://create.roblox.com/docs/performance-optimization/identify).
 
 ## Entradas móveis e ações independentes na versão 0.6.4
 
