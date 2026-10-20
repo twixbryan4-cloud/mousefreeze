@@ -1,6 +1,20 @@
 # Huss Valley Panel
 
-Versão 0.6.3 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.4 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Entradas móveis e ações independentes na versão 0.6.4
+
+Foi corrigido um caminho que podia acionar outra ação com Auto Ability desligado: quando não conseguia usar o botão nativo, Auto Dash enviava uma tecla virtual, Q por padrão. A função real dessa tecla pertence ao jogo. Esse envio não passava pelo toggle de Auto Ability e podia conflitar com o controle de entrada usado pela interface móvel. A reprodução simulada demonstra esse caminho; não identifica com certeza a causa exclusiva da partida relatada, pois não há gravação daquele incidente.
+
+Auto Dash agora usa o botão do jogo nos dispositivos com toque e nunca envia uma tecla virtual nesses dispositivos. **Fallback por tecla (PC)** começa desligado, inclusive ao carregar perfis antigos. Em dispositivos sem toque, só funciona após ativação explícita e fora do modo de gamepad; a tecla escolhida precisa corresponder ao dash configurado no jogo. Se o botão estiver ausente, o status informa isso. Novos botões do jogo invalidam o cache imediatamente. Uma falha em um callback ou sinal já tentado não provoca uma segunda tentativa por outro sinal ou tecla. Falhas de acionamento têm uma espera de 0,5 segundo antes de nova tentativa, sem reduzir a checagem normal de alcance por quadro.
+
+Cada ativação de adaptador recebe uma geração e o personagem correspondente. Desligar e ligar novamente ou trocar de personagem invalida tarefas anteriores, inclusive a continuação do Auto Dash entre callbacks. Entradas de teclado pertencentes ao painel são liberadas ao desligar o fallback, mudar a tecla, desativar o Dash, renascer ou destruir o painel; timers antigos não liberam uma entrada mais nova. O teste manual **Testar dash agora** continua sendo uma solicitação explícita e obedece ao bloqueio de teclado no toque.
+
+O método nativo de habilidade e o envio correspondente também verificam `autoAbility`; uma chamada antiga não envia `UseAbility` depois de desligado. No Huss Valley, Auto Attack não tenta mais ativar uma Tool genérica se MeleeEvent estiver temporariamente ausente. Auto Use Gears usa o comando separado `GearEvent("Use", nil, nil, requestId, nil, nil)` observado no trace do RescueKit, preservando a escolha de gear do jogo. Não chama Tool:Activate nesse jogo. O uso de gear exige Auto Use Gears ligado e conserva o intervalo configurado, a espera por resposta correlacionada, GearReadyAt e as recusas do servidor. As respostas de gear e habilidade são distinguidas pelo identificador do pedido. Em outros jogos, o uso genérico da ferramenta equipada permanece disponível.
+
+Anti-Idle por mouse é desligado com aviso quando ocorre um pedido em um dispositivo com toque; não envia clique de mouse nesse caso. O painel não força a visibilidade do analógico, não troca o controlador de movimento e não habilita controles que o próprio jogo tenha bloqueado durante seus estados.
+
+A sintaxe completa passou, junto de 3 asserções que reproduzem o caminho defeituoso da 0.6.3 e 56 verificações da correção: toque com e sem botão, ausência de tarefas ociosas, fallback opcional no PC, gamepad, erro parcial de callback, cancelamento após yield, desligamento e reativação, respawn, liberação de teclas, habilidade desligada, uso separado de gear, formato dos argumentos nil, correlação de respostas, cooldowns, remotes ausentes, transporte com falha e adaptadores externos. ESP, shaders, Freeze de até 3 segundos, perfis, diagnósticos e Speed Boost foram comparados com a versão anterior e preservados. Os testes usam APIs simuladas; o resultado no Roblox/Delta ainda precisa ser conferido no dispositivo.
 
 ## Otimização interna na versão 0.6.3
 
@@ -286,6 +300,7 @@ As opções começam desligadas. O ESP possui frequência de dados e distância 
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
 
 Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
+
 
 
 

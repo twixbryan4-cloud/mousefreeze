@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.3
+-- Huss Valley Panel 0.6.4
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -25,7 +25,7 @@ local defaults = {
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
     autoRevive=false, autoPick=false, promptDelay=0.6,
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
-    autoAbility=false, dashSide="Right",dashRange=15,dashDelay=1,dashKey="Q",tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
+    autoAbility=false, dashSide="Right",dashRange=15,dashDelay=1,dashKey="Q",dashKeyboardFallback=false,tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
     autoVote=false, disableGameAFK=false, antiIdle=false, antiHit=false,
     esp=false, boxes=true, names=true, tracers=false, health=true, distance=true,
     skeleton=false, headDot=false, healthText=false, roleColors=true, teamFilter=false, espTeams=false,
@@ -46,7 +46,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.3", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.4", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -824,11 +824,13 @@ actionButton(c,"Marcar zona aqui",function() if API.Native then API.Native.Captu
 c=card(left,"Player Lock On","lockOn","Mira no jogador vivo mais proximo dentro do raio. A captura do jogo precisa de integracao separada.")
 slider(c,"Radius","radius",5,150,1," studs");slider(c,"Prediction","prediction",0,0.5,0.01,"s")
 slider(c,"Smoothness","aimSmooth",1,25,1);checkbox(c,"Auto Face Target","faceTarget");checkbox(c,"Ignorar mesmo time","teamCheck")
-c=card(left,"Auto Use Gears","autoGears","Usa a ferramenta equipada. Nao compra nem inventa ferramentas.")
+c=card(left,"Auto Use Gears","autoGears","No Huss Valley, pede o uso do gear selecionado pelo jogo, separado da habilidade. Em outros jogos, usa a ferramenta equipada.")
 slider(c,"Intervalo","gearDelay",0.2,10,0.1,"s")
+API.NativeStatusLabels.gear=text(c,"Status: aguardando ativacao",9)
 pending(left,"Auto Down","autoDown")
-c=card(right,"Auto Dash","autoDash","Aciona o dash do jogo quando um oponente entra no alcance. O delay e o intervalo minimo entre tentativas; o jogo pode exigir mais tempo. Tenta o botao de dash e depois a tecla escolhida; no fallback, use a mesma tecla configurada no jogo.")
+c=card(right,"Auto Dash","autoDash","Aciona o botao de dash do jogo quando um oponente entra no alcance. No toque, nao simula teclas. O fallback por teclado exige ativacao explicita no PC e a tecla correta do jogo.")
 slider(c,"Alcance do inimigo","dashRange",2,100,1," studs");slider(c,"Delay","dashDelay",0.25,10,0.25,"s")
+checkbox(c,"Fallback por tecla (PC)","dashKeyboardFallback")
 cycle(c,"Tecla do dash (fallback)","dashKey",{"Q","E","F","LeftShift","LeftControl","Space"})
 API.NativeStatusLabels.dash=text(c,"Status: aguardando partida",9)
 actionButton(c,"Testar dash agora",function() if API.Native then API.Native.Dash(true) end end)
@@ -1467,12 +1469,17 @@ local function checkPromptCapability(v)
 end
 actions.autoPick=checkPromptCapability;actions.autoRevive=checkPromptCapability
 local function triggerTool(attack)
+    if game.GameId==10764627709 then
+        if not API.Native then return false end
+        if attack then return API.Native.AttackNearest(cfg.attackRange) end
+        return API.Native.UseGear()
+    end
     if attack and API.Native and API.Native.HasMelee() then return API.Native.AttackNearest(cfg.attackRange) end
     local char=player.Character;local tool=char and char:FindFirstChildOfClass("Tool")
     if tool and tool.Enabled then return pcall(function() tool:Activate() end) end
     return false
 end
-local adapterTimers,activeAdapters={},{}
+local adapterTimers,activeAdapters,adapterGeneration={},{},{}
 local function stepAdapters(dt)
     for key,name in pairs(activeAdapters) do
         if cfg[key] and type(adapters[name])=="function" and not state.pending[key] then
@@ -1487,12 +1494,13 @@ local function stepAdapters(dt)
             end
             if ready and (perFrame or adapterTimers[key]>=0.25) then
                 local delta=adapterTimers[key];adapterTimers[key]=0;state.pending[key]=true
+                local generation,char=adapterGeneration[key],player.Character
+                local function isActive() return state.alive and cfg[key] and adapterGeneration[key]==generation and player.Character==char and adapters[name]==callback end
                 task.spawn(function()
-                    if not state.alive or not cfg[key] or adapters[name]~=callback then state.pending[key]=nil;return end
-                    local ok,err=pcall(callback,{Player=player,Config=cfg,Character=player.Character,Delta=delta,Enabled=true,
-                        IsActive=function() return state.alive and cfg[key] end})
+                    if not isActive() then state.pending[key]=nil;return end
+                    local ok,err=pcall(callback,{Player=player,Config=cfg,Character=char,Delta=delta,Enabled=true,IsActive=isActive})
                     state.pending[key]=nil
-                    if not ok and state.alive then set(key,false,true);notify("Integracao interrompida: "..name);warn("[HV] "..tostring(err)) end
+                    if not ok and isActive() then set(key,false,true);notify("Integracao interrompida: "..name);warn("[HV] "..tostring(err)) end
                 end)
             end
         end
@@ -1501,9 +1509,11 @@ end
 for key,name in pairs(requiresAdapter) do actions[key]=function(v)
     -- Auto Zone is one immediate request per activation, never a repeating TP loop.
     activeAdapters[key]=v and key~="autoZone" and name or nil;adapterTimers[key]=0
+    adapterGeneration[key]=(adapterGeneration[key] or 0)+1
+    local generation,char=adapterGeneration[key],player.Character
     if type(adapters[name])=="function" and (not v or key=="autoZone") then
         adapters[name]({Player=player,Config=cfg,Character=player.Character,Enabled=v,
-            IsActive=function() return state.alive and cfg[key] end})
+            IsActive=function() return state.alive and cfg[key] and adapterGeneration[key]==generation and player.Character==char end})
     end
 end end
 -- Native commands transcribed from the user's runtime trace, never enabled by default.
@@ -1511,7 +1521,7 @@ do
     local N={Status={},Mapped={},ProximityAdapters={},ProximityReady={}}
     API.Native=N
     local paths={melee="ChickenOrHero.Game.MeleeEvent",tackle="ChickenOrHero.Game.GameAction",
-        ability="ChickenOrHero.Gear.GearEvent",dash="ChickenOrHero.Presentation.BoostRequest",replay="ChickenOrHero.Game.HitReplayEvent"}
+        ability="ChickenOrHero.Gear.GearEvent",gear="ChickenOrHero.Gear.GearEvent",dash="ChickenOrHero.Presentation.BoostRequest",replay="ChickenOrHero.Game.HitReplayEvent"}
     local cached,bound,pending,recent,readyAt,lastAttempt={},{},{},{},{},{}
     local roleColors={Catcher=Color3.fromRGB(244,115,125),Runner=Color3.fromRGB(110,212,172)}
     local function finite(value) return type(value)=="number" and value==value and math.abs(value)~=math.huge end
@@ -1588,13 +1598,15 @@ do
             if os.clock()-request.started<5 then status(kind,"Aguardando resposta do jogo");return false end
             pending[kind]=nil;local row=status(kind,"Resposta nao observada");row.timeouts=row.timeouts+1
         end
-        if os.clock()-(lastAttempt[kind] or -math.huge)<(kind=="attack" and cfg.attackDelay or 1.1) then return false end
+        local delay=kind=="attack" and cfg.attackDelay or kind=="gear" and cfg.gearDelay or 1.1
+        if os.clock()-(lastAttempt[kind] or -math.huge)<delay then return false end
         local untilTime=readyAt[kind] or 0
         if attribute then local value=player:GetAttribute(attribute);if finite(value) then untilTime=math.max(untilTime,value) end end
         if serverNow<untilTime then status(kind,"Aguardando disponibilidade do jogo");return false end
         return true
     end
     local function send(kind,r,id,...)
+        if (kind=="ability" and not cfg.autoAbility) or (kind=="gear" and not cfg.autoGears) then return false end
         local now=os.clock();lastAttempt[kind]=now
         for key,entry in pairs(recent) do if now-entry.at>10 then recent[key]=nil end end
         if id then pending[kind]={id=id,started=now};recent[id]={kind=kind,at=now} end
@@ -1654,17 +1666,26 @@ do
         return root,r,now,target
     end
     function N.UseAbility()
+        if not cfg.autoAbility then return false end
         local root,r,now,target=readyAbility();if not root then return false end
         local direction=flatUnit(target.Position-root.Position) or flatUnit(root.CFrame.LookVector);if not direction then return false end
         local id=Http:GenerateGUID(false)
         return send("ability",r,id,"UseAbility",nil,direction,id,nil,nil)
     end
-    local dashInput={buttons={},scanAt=-math.huge,heldKey=nil,manager=nil,observation=nil}
+    function N.UseGear()
+        if not state.alive or not cfg.autoGears then return false end
+        local char,hum,root=character();if not char or not hum or not root or hum.Health<=0 then return false end
+        local r,now=remote("gear"),clock();if not r or not now or not available("gear",now,"GearReadyAt") then return false end
+        -- The user's trace distinguishes Use (gear) from UseAbility; never activate an arbitrary Tool here.
+        local id=Http:GenerateGUID(false)
+        return send("gear",r,id,"Use",nil,nil,id,nil,nil)
+    end
+    local dashInput={buttons={},scanAt=-math.huge,retryAt=0,heldKey=nil,manager=nil,observation=nil}
     function N.ReleaseDashInput()
         if dashInput.heldKey and dashInput.manager then
             pcall(function() dashInput.manager:SendKeyEvent(false,dashInput.heldKey,false,game) end)
         end
-        dashInput.heldKey=nil;dashInput.observation=nil
+        dashInput.heldKey=nil;dashInput.keyToken=nil;dashInput.observation=nil
     end
     local function visibleButton(object,playerGui)
         if not object.Parent or object:IsDescendantOf(gui) or not object:IsDescendantOf(playerGui) then return false end
@@ -1696,9 +1717,10 @@ do
         end
         return playerGui
     end
-    local function activateDashButton()
+    local function activateDashButton(isActive)
         local playerGui=findDashButtons();if not playerGui then return false end
         for _,object in ipairs(dashInput.buttons) do
+            if not isActive() then return false,nil,true end
             if visibleButton(object,playerGui) then
                 for _,event in ipairs({"Activated","MouseButton1Click"}) do
                     local signal=object[event];local ok,list=false,nil
@@ -1712,19 +1734,30 @@ do
                             if good and type(callback)=="function" then callbacks[#callbacks+1]=callback end
                         end
                         if #callbacks>0 then
-                            local fired=false
-                            for _,callback in ipairs(callbacks) do if pcall(callback,nil,1) then fired=true end end
-                            if fired then return true,"Botao do jogo" end
+                            for _,callback in ipairs(callbacks) do
+                                if not isActive() then return false,nil,true end
+                                if not pcall(callback,nil,1) then return false,"Falha no botao de dash; sem tentar outra entrada",true end
+                            end
+                            return true,"Botao do jogo",true
                         end
                     elseif type(firesignal)=="function" then
-                        if pcall(firesignal,signal,nil,1) then return true,"Sinal do botao" end
+                        if not isActive() then return false,nil,true end
+                        if pcall(firesignal,signal,nil,1) then return true,"Sinal do botao",true end
+                        return false,"Falha no sinal de dash; sem tentar outra entrada",true
                     end
                 end
             end
         end
         return false
     end
+    local function keyboardFallbackAllowed()
+        if not cfg.dashKeyboardFallback or Input.TouchEnabled then return false end
+        local ok,preferred=pcall(function() return Input.PreferredInput end)
+        if ok and preferred~=nil and preferred~=Enum.PreferredInput.KeyboardAndMouse then return false end
+        return true
+    end
     local function pressDashKey()
+        if not keyboardFallbackAllowed() then return false end
         local key=Enum.KeyCode[cfg.dashKey]
         if Input:IsKeyDown(key) then return false end
         local ok,manager=pcall(function() return game:GetService("VirtualInputManager") end)
@@ -1733,9 +1766,10 @@ do
         local sent=pcall(function() manager:SendKeyEvent(true,key,false,game) end)
         if not sent then pcall(function() manager:SendKeyEvent(false,key,false,game) end);return false end
         dashInput.heldKey=key
+        local token={};dashInput.keyToken=token
         task.delay(0.06,function()
-            if dashInput.heldKey==key then
-                pcall(function() manager:SendKeyEvent(false,key,false,game) end);dashInput.heldKey=nil
+            if dashInput.heldKey==key and dashInput.keyToken==token then
+                pcall(function() manager:SendKeyEvent(false,key,false,game) end);dashInput.heldKey=nil;dashInput.keyToken=nil
             end
         end)
         return true,"Tecla "..cfg.dashKey
@@ -1753,14 +1787,26 @@ do
         if char:GetAttribute("DashReady")==false then status("dash","Aguardando dash disponivel");return end
         if os.clock()-(lastAttempt.dash or -math.huge)<cfg.dashDelay then status("dash","Aguardando delay configurado");return end
         if test~=true and not opponent(root,cfg.dashRange,role) then status("dash","Nenhum oponente no alcance");return end
+        if os.clock()<dashInput.retryAt then return end
+        if not keyboardFallbackAllowed() then
+            local playerGui=findDashButtons();local found=false
+            if playerGui then for _,button in ipairs(dashInput.buttons) do if visibleButton(button,playerGui) then found=true;break end end end
+            if not found then status("dash",Input.TouchEnabled and "Botao de dash indisponivel; teclas bloqueadas no toque" or "Botao de dash indisponivel; fallback por tecla desligado");return end
+        end
         return char
     end
-    function N.Dash(test)
+    function N.Dash(test,stillEnabled)
         local char=readyDash(test);if not char then return false end
         local before=char:GetAttribute("DashCount")
-        local fired,source=activateDashButton()
-        if not fired then fired,source=pressDashKey() end
-        if not fired then status("dash","Entrada indisponivel: botao/tecla nao acionados");return false end
+        local function isActive() return state.alive and player.Character==char and (test==true or cfg.autoDash) and (not stillEnabled or stillEnabled()) end
+        local fired,source,attempted=activateDashButton(isActive)
+        if not fired and not attempted and isActive() then fired,source=pressDashKey() end
+        if not fired then
+            dashInput.retryAt=os.clock()+0.5
+            if isActive() then status("dash",source or "Entrada indisponivel; nenhuma tecla automatica foi enviada") end
+            return false
+        end
+        if not isActive() then return false end
         lastAttempt.dash=os.clock()
         local row=status("dash",source.." acionado; verificando dash")
         row.sent=row.sent+1;row.source=source
@@ -1923,7 +1969,11 @@ do
     end
     -- End Auto Zone.
     local function perform(ctx,kind,fn)
-        if ctx.Enabled then if not ctx.IsActive or ctx.IsActive() then fn() end else cancel(kind) end
+        if ctx.Enabled then
+            if not ctx.IsActive or ctx.IsActive() then
+                if kind=="dash" then fn(nil,ctx.IsActive) else fn() end
+            end
+        else cancel(kind) end
     end
     local function installProximity(name,kind,fn,ready)
         if remote(kind) and type(adapters[name])~="function" then
@@ -1937,11 +1987,14 @@ do
         installProximity("AutoDash","dash",N.Dash,readyDash)
         installProximity("AutoTackle","tackle",N.Tackle,readyTackle)
         installProximity("AutoAbility","ability",N.UseAbility,readyAbility)
-        N.Mapped.attack=remote("melee")~=nil;N.Mapped.dash=remote("dash")~=nil;N.Mapped.tackle=remote("tackle")~=nil;N.Mapped.ability=remote("ability")~=nil
+        N.Mapped.attack=remote("melee")~=nil;N.Mapped.dash=remote("dash")~=nil;N.Mapped.tackle=remote("tackle")~=nil;N.Mapped.ability=remote("ability")~=nil;N.Mapped.gear=remote("gear")~=nil
         bind("melee",function(id,accepted,data) acknowledge("attack",id,accepted,data) end)
         bind("tackle",function(action,id,accepted,data) if action=="TackleResult" then acknowledge("tackle",id,accepted,data) end end)
         bind("ability",function(action,data)
-            if action=="PredictionResult" and type(data)=="table" then acknowledge("ability",data.requestId,data.accepted,data) end
+            if action=="PredictionResult" and type(data)=="table" then
+                acknowledge("ability",data.requestId,data.accepted,data)
+                acknowledge("gear",data.requestId,data.accepted,data)
+            end
         end)
         bind("replay",function(action,data)
             if action~="Verdict" or type(data)~="table" or data.source~="Server" then return end
@@ -1951,19 +2004,30 @@ do
         end)
     end
     actions.autoAttack=function(value) if not value then cancel("attack") end end
+    actions.autoGears=function(value) if not value then cancel("gear") end end
+    actions.dashKeyboardFallback=N.ReleaseDashInput
+    actions.dashKey=N.ReleaseDashInput
     if game.GameId==10764627709 then
         install()
         listen(player.CharacterAdded,function()
-            pending={};recent={};N.ReleaseDashInput();dashInput.scanAt=-math.huge
+            pending={};recent={};N.ReleaseDashInput();dashInput.scanAt=-math.huge;dashInput.retryAt=0
             if cfg.autoZone then set("autoZone",false,true) else N.CancelZone() end
         end)
         listen(Replicated.DescendantAdded,function(object)
             if object:IsA("RemoteEvent") and (object.Name=="MeleeEvent" or object.Name=="GameAction" or object.Name=="GearEvent" or object.Name=="BoostRequest" or object.Name=="HitReplayEvent") then install() end
         end)
+        listen(player.DescendantAdded,function(object)
+            if (object:IsA("GuiButton") or object:IsA("PlayerGui")) and not object:IsDescendantOf(gui) then
+                dashInput.scanAt=-math.huge;dashInput.retryAt=0
+            end
+        end)
     end
 end
 listen(player.Idled,function()
     if not cfg.antiIdle then return end
+    if Input.TouchEnabled then
+        set("antiIdle",false,true);notify("Anti-Idle por mouse desativado no toque para preservar os controles moveis.");return
+    end
     local ok=pcall(function()
         local vu=game:GetService("VirtualUser");vu:CaptureController();vu:ClickButton2(Vector2.new(0,0))
     end)
@@ -3113,7 +3177,7 @@ listen(Run.Heartbeat,function(dt)
         if cfg.tpWalk and not cfg.fly then root.CFrame=root.CFrame+hum.MoveDirection*cfg.tpSpeed*math.min(dt,0.1) end
         if cfg.spin and not cfg.fly then root.CFrame=root.CFrame*CFrame.Angles(0,math.rad(cfg.spinSpeed)*dt,0) end
         if cfg.autoAttack then
-            if API.Native.HasMelee() then API.Native.AttackNearest(cfg.attackRange)
+            if game.GameId==10764627709 or API.Native.HasMelee() then API.Native.AttackNearest(cfg.attackRange)
             elseif now-lastAction.attack>=cfg.attackDelay and nearest(cfg.attackRange) and triggerTool(true) then lastAction.attack=now end
         end
         if cfg.autoGears and now-lastAction.gear>=cfg.gearDelay and triggerTool() then lastAction.gear=now end
@@ -3197,6 +3261,7 @@ task.defer(function()
     end)
 end)
 return API
+
 
 
 
