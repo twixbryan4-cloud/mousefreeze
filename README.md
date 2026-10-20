@@ -1,6 +1,22 @@
 # Huss Valley Panel
 
-Versão 0.6.7 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.8 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Retenção do lock e assistência na versão 0.6.8
+
+Foram reproduzidas três situações na versão 0.6.7: voltar para CameraType.Custom durante um gesto soltava imediatamente o alvo; um terceiro jogador collidable podia obstruir o raycast e ser tratado como uma parede; o desvio manual máximo podia esconder o marcador em telas estreitas ou com FOV baixo, mesmo com o alvo ainda selecionado. Isso identifica causas possíveis no código, sem confirmar qual delas ocorreu na partida relatada.
+
+No modo Console, um retorno a Custom pode ser recuperado durante os 0,35 segundo seguintes ao início de um gesto de câmera válido ou ao movimento de visão mais recente. A câmera e seu CameraSubject precisam continuar sendo os mesmos, e o personagem e o alvo precisam estar válidos. A seleção é preservada durante essa recuperação. Mudança de câmera, outro CameraSubject, tipos de cena como Track/Follow ou mudanças fora dessa janela continuam sendo respeitados. Gestos consumidos pela interface e o joystick virtual não autorizam essa recuperação. O contador local `API.LockOn.CameraRecoveries` permite verificar recuperações ocorridas na trava atual.
+
+O filtro de raycast agora exclui todos os personagens dos jogadores. A lista é atualizada junto da consulta de visibilidade existente, a cada 0,1 segundo enquanto travado, incluindo personagens que renasceram depois da aquisição. Avatares que cruzam a luta não se tornam paredes para visão ou colisão da câmera. O teste de paredes reais, a tolerância de obstrução de 0,65 segundo, os filtros de time, a distância de retenção e os critérios de vida/identidade foram mantidos.
+
+O giro manual continua disponível. Sua contribuição é limitada apenas quando tiraria o alvo de uma região central com margem na tela, considerando o FOV e a orientação atual do aparelho. Isso evita uma mira desaparecendo ao olhar em uma tela estreita. O marcador mantém a escala por distância da versão anterior. A assistência volta suavemente quando o dedo fica parado, mesmo que ainda esteja encostado na tela; eventos sem deslocamento não adiam esse retorno. Novos movimentos continuam ajustando a visão normalmente.
+
+A resposta de posição e direção passou de `aimSmooth * 1.35 + 2` para `aimSmooth * 1.5 + 2`, mantendo os pisos anteriores: com o valor padrão 12, o ganho passa de 18,2 para 20, aproximadamente 10% maior. O retorno dos desvios manuais passa de 3,4 para 3,8. A curva elevada de perto, o acompanhamento vertical ancorado ao jogador local e os limites manuais de 26/18 graus permanecem. O modo Classico conserva seu controlador anterior. Nenhuma entrada virtual, habilidade, dash ou ataque é enviado por essa assistência.
+
+Uma soltura real mantém uma descrição em `API.LockOn.LastRelease`, com horário local, tipo de câmera e distância quando disponível. O status do próprio Lock On também continua mostrando o motivo. Esses dados ficam na sessão do painel.
+
+O arquivo completo compilou com o compilador oficial Luau 0.741. Passaram 530 asserções simuladas, incluindo as regressões de entradas nativas e FPS, gestos repetidos com reset de câmera, avatares cruzando/renascendo, paredes reais, margem de enquadramento em FOV 40/70 e orientações de celular, cancelamento, retorno da assistência com o dedo parado e comparação com o solver anterior. Os seis checks que reproduzem os defeitos anteriores também foram executados contra a versão 0.6.7. ESP, comandos nativos, FPS, shaders e ações de Auto Jump/Freeze foram comparados sem alteração de código. A execução e a sensação no Roblox/Delta ainda precisam ser confirmadas no aparelho. O mesmo loadstring continua válido.
 
 ## Ajustes do lock-on na versão 0.6.7
 

@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.7
+-- Huss Valley Panel 0.6.8
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -47,7 +47,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.7", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.8", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -1580,7 +1580,15 @@ do
     local query=RaycastParams.new()
     query.FilterType=Enum.RaycastFilterType.Exclude;query.IgnoreWater=true;query.RespectCanCollide=true
     local function filters(char,targetChar)
-        query.FilterDescendantsInstances={char,targetChar,visuals}
+        local excluded={visuals}
+        if char then excluded[#excluded+1]=char end
+        if targetChar and targetChar~=char then excluded[#excluded+1]=targetChar end
+        -- Avatars crossing a fight are not walls, including players that respawn after acquisition.
+        for _,p in ipairs(roster) do
+            local model=p.Character
+            if model and model~=char and model~=targetChar then excluded[#excluded+1]=model end
+        end
+        query.FilterDescendantsInstances=excluded
     end
     local function clearSight(origin,point)
         local delta=point-origin
@@ -1599,7 +1607,7 @@ do
     end
     function K.ClearLook()
         K.manualYaw=0;K.manualPitch=0;K.stick=Vector2.new(0,0)
-        K.lookTouch=nil;K.lastLookAt=-math.huge
+        K.lookTouch=nil;K.lastLookAt=-math.huge;K.gestureAt=-math.huge
     end
     local function canLook()
         return state.alive and not state.booting and cfg.lockOn and cfg.lockMode=="Console"
@@ -1607,6 +1615,7 @@ do
     end
     function K.AddLook(x,y,sensitivity)
         -- Bounded offsets keep target assistance active while accepting real look input.
+        if x==0 and y==0 then return end
         K.manualYaw=math.clamp(K.manualYaw-math.clamp(x*sensitivity,-0.2,0.2),-math.rad(26),math.rad(26))
         K.manualPitch=math.clamp(K.manualPitch-math.clamp(y*sensitivity,-0.16,0.16),-math.rad(18),math.rad(18))
         K.lastLookAt=os.clock()
@@ -1618,13 +1627,17 @@ do
             local view=cam.ViewportSize
             -- Leave the lower-left movement area to the virtual thumbstick.
             if input.Position.X<view.X*0.4 and input.Position.Y>view.Y*0.35 then return end
-            K.lookTouch=input
+            K.lookTouch=input;K.gestureAt=os.clock()
+        elseif input.UserInputType==Enum.UserInputType.MouseButton2 then
+            K.gestureAt=os.clock()
         end
     end
     function K.LookChanged(input,processed)
         if not canLook() then return end
         if input.KeyCode==Enum.KeyCode.Thumbstick2 then
-            K.stick=processed and Vector2.new(0,0) or Vector2.new(input.Position.X,input.Position.Y)
+            local stick=processed and Vector2.new(0,0) or Vector2.new(input.Position.X,input.Position.Y)
+            if stick.Magnitude>0.16 and K.stick.Magnitude<=0.16 then K.gestureAt=os.clock() end
+            K.stick=stick
         elseif input==K.lookTouch and not pointerSessions[input] then
             local cam=workspace.CurrentCamera;if not cam then return end
             local sensitivity=math.rad(150)/math.max(320,math.min(cam.ViewportSize.X,cam.ViewportSize.Y))
@@ -1646,13 +1659,19 @@ do
             local stick=K.stick*((math.min(1,magnitude)-0.16)/(0.84*magnitude))
             K.AddLook(stick.X,-stick.Y,math.rad(105)*step)
         end
-        local holding=K.lookTouch~=nil or Input:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or magnitude>0.16
-        if not holding and os.clock()-K.lastLookAt>0.14 then
-            local decay=math.exp(-3.4*step)
+        -- A resting finger must not freeze an old offset away from the target.
+        if os.clock()-K.lastLookAt>0.14 then
+            local decay=math.exp(-3.8*step)
             K.manualYaw=K.manualYaw*decay;K.manualPitch=K.manualPitch*decay
         end
     end
     function K.Release(message)
+        if K.target then
+            local _,_,root=character();local cam=workspace.CurrentCamera
+            K.LastRelease={message=message or "Alvo solto",at=os.clock(),
+                cameraType=cam and cam.CameraType.Name or "none",
+                distance=root and (K.target.root.Position-root.Position).Magnitude or nil}
+        end
         restoreCamera()
         K.ClearLook()
         K.target=nil;K.localCharacter=nil;K.heading=nil;K.occludedAt=nil;K.losClock=0;state.aimTarget=nil
@@ -1675,6 +1694,7 @@ do
         local best,bestScore,bestDistance
         local view=cam.ViewportSize
         if view.X<=0 or view.Y<=0 then return end
+        filters(localChar)
         for _,p in ipairs(roster) do
             if p~=player and p.Parent==Players and not (cfg.teamCheck and sameTeam(p)) then
                 local a=actor(p)
@@ -1683,7 +1703,6 @@ do
                     if distance<=cfg.radius then
                         local point,onScreen=cam:WorldToViewportPoint(a.root.Position+Vector3.new(0,0.5,0))
                         if onScreen and point.Z>0.1 then
-                            filters(localChar,a.char)
                             if not cfg.lockWallCheck or clearSight(cam.CFrame.Position,a.root.Position+Vector3.new(0,0.5,0)) then
                                 local x,y=(point.X-view.X*0.5)/view.X,(point.Y-view.Y*0.5)/view.Y
                                 local score=x*x+y*y
@@ -1712,7 +1731,8 @@ do
         if not target then status("SEM ALVO","Nenhum jogador visivel dentro do raio; mire nele e tente novamente");return false end
         K.target=target;K.localCharacter=char;state.aimTarget=target.root
         K.ClearLook()
-        K.saved={camera=cam,kind=cam.CameraType};K.acquiredAt=os.clock();K.fadeAt=nil
+        K.saved={camera=cam,kind=cam.CameraType,subject=cam.CameraSubject};K.acquiredAt=os.clock();K.fadeAt=nil
+        K.CameraRecoveries=0
         K.heading=Vector3.new(cam.CFrame.LookVector.X,0,cam.CFrame.LookVector.Z)
         if K.heading.Magnitude<0.01 then K.heading=Vector3.new(0,0,-1) else K.heading=K.heading.Unit end
         filters(char,target.char);K.losClock=0;K.occludedAt=nil
@@ -1745,6 +1765,12 @@ do
         marker.Position=UDim2.fromOffset(screen.X,screen.Y)
         marker.GroupTransparency=1-ease;marker.Visible=true
     end
+    local function inFrame(frame,point,tanX,tanY)
+        local delta=point-frame.Position
+        local depth=delta:Dot(frame.LookVector)
+        return depth>0.05 and math.abs(delta:Dot(frame.RightVector))<=depth*tanX*0.84
+            and math.abs(delta:Dot(frame.UpVector))<=depth*tanY*0.84
+    end
     function K.Solve(localPoint,targetPoint,cam,dt)
         K.StepLook(dt)
         local delta=targetPoint-localPoint
@@ -1754,7 +1780,7 @@ do
             local current=K.heading or desired
             local a,b=math.atan2(current.X,current.Z),math.atan2(desired.X,desired.Z)
             local turn=math.atan2(math.sin(b-a),math.cos(b-a))
-            a=a+turn*(1-math.exp(-math.max(10,cfg.aimSmooth*1.35+2)*math.min(dt,0.1)))
+            a=a+turn*(1-math.exp(-math.max(10,cfg.aimSmooth*1.5+2)*math.min(dt,0.1)))
             K.heading=Vector3.new(math.sin(a),0,math.cos(a))
         end
         local heading=K.heading or Vector3.new(0,0,-1)
@@ -1770,7 +1796,7 @@ do
         local extent=distance*0.62+3
         local arm=math.max(14,extent/math.max(0.1,math.sin(halfAngle))*1.08)
         local wanted=levelFocus-heading*(math.cos(pitch)*arm)+Vector3.new(0,math.sin(pitch)*arm,0)
-        local alpha=1-math.exp(-math.max(6,cfg.aimSmooth*1.35+2)*math.min(dt,0.1))
+        local alpha=1-math.exp(-math.max(6,cfg.aimSmooth*1.5+2)*math.min(dt,0.1))
         local position=cam.CFrame.Position:Lerp(wanted,alpha)
         -- Resolve obstruction after interpolation as well, so smoothing cannot carry the camera through a wall.
         local ray=position-localPoint
@@ -1783,7 +1809,23 @@ do
         local yaw=math.atan2(direction.X,direction.Z)+K.manualYaw
         local lookPitch=math.clamp(math.asin(math.clamp(direction.Y,-1,1))+K.manualPitch,-math.rad(85),math.rad(85))
         local look=Vector3.new(math.sin(yaw)*math.cos(lookPitch),math.sin(lookPitch),math.cos(yaw)*math.cos(lookPitch))
-        return CFrame.lookAt(position,position+look),focus,pitch
+        local frame=CFrame.lookAt(position,position+look)
+        local tanY=math.tan(halfVertical);local tanX=tanY*math.max(0.01,aspect)
+        if not inFrame(frame,targetPoint,tanX,tanY) then
+            local centered=CFrame.lookAt(position,focus)
+            if inFrame(centered,targetPoint,tanX,tanY) then
+                -- Limit only the portion of manual rotation that would hide the selected target.
+                local low,high=0,1
+                for _=1,5 do
+                    local mid=(low+high)*0.5
+                    if inFrame(centered:Lerp(frame,mid),targetPoint,tanX,tanY) then low=mid else high=mid end
+                end
+                frame=centered:Lerp(frame,low)
+            elseif (targetPoint-position).Magnitude>0.1 then
+                frame=CFrame.lookAt(position,targetPoint)
+            end
+        end
+        return frame,focus,pitch
     end
     local function face(root,hum,point)
         if not cfg.faceTarget or root.Anchored or hum.Sit or hum.PlatformStand then return end
@@ -1815,12 +1857,22 @@ do
         end
         local target=K.target
         if not target then hideMarker(dt,cam);return end
-        if not K.saved or cam~=K.saved.camera or cam.CameraType~=Enum.CameraType.Scriptable then K.Release("Camera alterada pelo jogo; escolha o alvo novamente");hideMarker(dt,cam);return end
+        if not K.saved or cam~=K.saved.camera then K.Release("Camera alterada pelo jogo; escolha o alvo novamente");hideMarker(dt,cam);return end
         if player.Character~=K.localCharacter or not liveTarget(target,root) then K.Release("Alvo fora das condicoes; aperte para escolher outro");hideMarker(dt,cam);return end
+        if cam.CameraType~=Enum.CameraType.Scriptable then
+            local recentLook=os.clock()-math.max(K.lastLookAt,K.gestureAt or -math.huge)<=0.35
+            if cam.CameraType==Enum.CameraType.Custom and cam.CameraSubject==K.saved.subject and recentLook and canLook() then
+                cam.CameraType=Enum.CameraType.Scriptable
+                K.CameraRecoveries=K.CameraRecoveries+1;K.lastRecoveryAt=os.clock()
+            else
+                K.Release("Camera alterada pelo jogo; escolha o alvo novamente");hideMarker(dt,cam);return
+            end
+        end
         local point=target.root.Position+Vector3.new(0,0.5,0)
         K.losClock=K.losClock+dt
         if K.losClock>=0.1 then
             K.losClock=0
+            filters(K.localCharacter,target.char)
             if cfg.lockWallCheck and not clearSight(root.Position+Vector3.new(0,1.5,0),point) then K.occludedAt=K.occludedAt or os.clock()
             else K.occludedAt=nil end
         end
