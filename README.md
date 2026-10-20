@@ -1,6 +1,16 @@
 # Huss Valley Panel
 
-Versão 0.6.6 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.7 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Ajustes do lock-on na versão 0.6.7
+
+O modo Console aceita giro manual limitado sem abandonar o alvo. No celular, arraste na área livre da câmera; joystick de movimento, botões e arrastos da interface ficam separados. No PC, segure o botão direito para olhar, ou mova o mouse normalmente quando ele já estiver travado no centro. O analógico direito físico também permite olhar. O desvio é limitado a 26 graus na horizontal e 18 na vertical; ao soltar a entrada, a assistência retorna suavemente ao enquadramento. Digitação, configuração de tecla, perda de foco, desconexão do controle, soltura do alvo e troca de câmera limpam as entradas correspondentes.
+
+O acompanhamento horizontal e da posição responde um pouco mais rápido com o mesmo valor de **Suavidade da câmera**. O alvo permanece fixo e o enquadramento próximo continua elevado. A altura e o braço do rig passam a depender da posição local e da separação horizontal: quando o oponente voa, o ponto de visão sobe para acompanhá-lo sem levar o rig junto para cima. A colisão continua sendo resolvida após a interpolação, agora a partir do pivô local.
+
+O marcador usa a distância entre os personagens para crescer de perto e diminuir de longe. O zoom automático do rig não inverte mais essa relação. O tamanho fica limitado pela tela, com teto de 112 pixels e animações preservadas. O modo Classico mantém o seu controlador anterior e recebe apenas essa correção de escala.
+
+A sintaxe do arquivo completo e 78 asserções do módulo real de lock-on extraído do arquivo passaram com APIs Roblox simuladas: escala por distância e resolução, movimento vertical, mouse, toque, controle, limites e retorno do giro, isolamento do joystick/interface, alvo persistente, colisão, paredes, alcance, morte/respawn, troca de câmera, teclado, modo Classico, encerramento e resposta a 30/60/120/240 Hz. A comparação com o solver anterior confirma o aumento de resposta. As outras funções do painel foram preservadas; os testes antigos dessas funções não foram reexecutados nesta alteração. A sensação e a execução no Roblox/Delta ainda precisam de teste no aparelho. O loadstring continua igual.
 
 ## Lock-on de combate na versão 0.6.6
 
