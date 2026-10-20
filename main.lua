@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.13
+-- Huss Valley Panel 0.6.14
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -21,7 +21,7 @@ local defaults = {
     noclip=false, tpWalk=false, tpSpeed=16, infiniteJump=false, spin=false, spinSpeed=120,
     autoJumpButton=false, freezeButton=false, autoJumpInterval=0.15, freezeDuration=0.12, freezeCooldown=1,
     resizeJumpButton=false, jumpButtonScale=1.5,
-    resizeShiftLock=false, shiftLockScale=1.5,
+    resizeShiftLock=false, shiftLockScale=1.5, selectedButtonScale=1,
     firstPerson=false, unlockMouse=false, fov=70, customFov=false, fullbright=false, xray=false,
     lockOn=false, radius=30, prediction=0.12, aimSmooth=12, faceTarget=false, teamCheck=false,
     lockMode="Console", lockButton=false, lockKey="L", lockReleaseRange=80, lockWallCheck=true,
@@ -49,7 +49,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.13", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.14", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -302,8 +302,9 @@ local function patch(group,object,property,value)
     local record=g[object]
     if not record then record={}; g[object]=record end
     local ok=pcall(function()
-        if record[property]==nil then record[property]={object[property]} end
-        object[property]=value
+        local current=object[property]
+        if record[property]==nil then record[property]={current} end
+        if current~=value then object[property]=value end
     end)
     return ok
 end
@@ -340,7 +341,7 @@ local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,36
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
     shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85},
-    autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5},jumpButtonScale={0.5,3},shiftLockScale={0.5,3}}
+    autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5},jumpButtonScale={0.5,3},shiftLockScale={0.5,3},selectedButtonScale={0.5,3}}
 local function valid(key,value,keyContext)
     keyContext=keyContext or cfg
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
@@ -925,7 +926,14 @@ do
     API.ShiftLockSizeStatus=text(content,"Status: desligado",9,{Size=UDim2.new(1,0,0,34),TextWrapped=true})
     actionButton(content,"Selecionar Shift Lock",function() if API.TouchControls then API.TouchControls.PickShiftLock() end end)
     actionButton(content,"Restaurar tamanho original",function() set("resizeShiftLock",false) end)
-    content=card(left,"Posicoes dos botoes",nil,"Ative os ajustes de pulo e/ou Shift Lock. Toque em Editar posicoes, arraste os botoes e conclua. Salve um perfil para guardar a configuracao.")
+    content=card(left,"Editar qualquer botao",nil,"Escolha um botao existente do jogo por toque. Cada selecionado tem seu tamanho e posicao. Salve um perfil para guardar; nao aciona a funcao durante a escolha.")
+    actionButton(content,"Selecionar botao na tela",function() if API.TouchControls then API.TouchControls.PickButton() end end)
+    actionButton(content,"Proximo selecionado",function() if API.TouchControls then API.TouchControls.NextSelected() end end)
+    slider(content,"Tamanho do selecionado","selectedButtonScale",0.5,3,0.05,"x")
+    API.SelectedButtonStatus=text(content,"Nenhum botao selecionado",9,{Size=UDim2.new(1,0,0,42),TextWrapped=true})
+    actionButton(content,"Restaurar e remover selecionado",function() if API.TouchControls then API.TouchControls.RemoveSelected() end end)
+    actionButton(content,"Restaurar todos os extras",function() if API.TouchControls then API.TouchControls.ClearSelected() end end)
+    content=card(left,"Posicoes dos botoes",nil,"Ative pulo/Shift Lock ou selecione outros botoes. Toque em Editar posicoes, arraste os botoes e conclua. Salve um perfil para guardar a configuracao.")
     API.TouchEditButton=actionButton(content,"Editar posicoes",function() if API.TouchControls then API.TouchControls.ToggleEditor() end end)
     actionButton(content,"Restaurar posicoes do jogo",function() if API.TouchControls then API.TouchControls.ResetPositions() end end)
     content=card(left,"Freeze","freezeButton","Liga o botao flutuante para uma travada curta da tela/jogo e retorno automatico.")
@@ -1193,7 +1201,7 @@ bindCameraSize();listen(workspace:GetPropertyChangedSignal("CurrentCamera"),bind
 
 -- Mobile button geometry and an explicit layout editor; native activation stays with the game.
 do
-    local T={generation=0,connections={},entries={},positions={}}
+    local T={generation=0,connections={},entries={},positions={},customKeys={},serial=0}
     API.TouchControls=T;API.JumpButtonSize=T
     T.entries.jump={label="PULO",enabled="resizeJumpButton",scale="jumpButtonScale",status=API.JumpButtonSizeStatus}
     T.entries.shift={label="SHIFT LOCK",enabled="resizeShiftLock",scale="shiftLockScale",status=API.ShiftLockSizeStatus}
@@ -1205,7 +1213,19 @@ do
     local picker=create("TextButton",{Name="ChooseShiftLock",Size=UDim2.fromScale(1,1),Text="Toque no botao Shift Lock que voce usa",
         TextYAlignment=Enum.TextYAlignment.Top,Font=Enum.Font.GothamBold,TextSize=14,TextColor3=colors.text,
         BackgroundTransparency=0.8,BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,Visible=false,Active=true,ZIndex=82},layer)
-    local function status(entry,message) if entry.status.Text~=message then entry.status.Text=message end end
+    local function enabled(entry) return entry.custom or cfg[entry.enabled] end
+    local function scaleOf(entry) return entry.custom and entry.factor or cfg[entry.scale] end
+    function T.SelectedStatus()
+        local entry=T.entries[T.selectedKey]
+        local message=entry and (entry.label.." | "..(entry.message or "aguardando")) or "Nenhum botao selecionado"
+        if API.SelectedButtonStatus.Text~=message then API.SelectedButtonStatus.Text=message end
+    end
+    local function status(entry,message)
+        entry.message=message
+        if entry.status and entry.status.Text~=message then entry.status.Text=message end
+        if T.entries[T.selectedKey]==entry then T.SelectedStatus() end
+    end
+    local function write(object,property,value) if object[property]~=value then object[property]=value end end
     local function disconnect(list) for _,c in ipairs(list) do c:Disconnect() end end
     local function roots()
         local result,seen={},{}
@@ -1223,14 +1243,14 @@ do
         if b and b:IsA("GuiButton") then return b end
     end
     local function externalButton(b)
-        if not b or not b:IsA("GuiButton") or not b.Parent or not b.Parent:IsA("GuiBase2d") or b:IsDescendantOf(gui) or b==nativeJump() then return false end
+        if not b or not b:IsA("GuiButton") or not b.Parent or not b.Parent:IsA("GuiBase2d") or b:IsDescendantOf(gui) then return false end
         if b:IsDescendantOf(player) then return true end
         for _,root in ipairs(T.scopes or roots()) do if b:IsDescendantOf(root.object) then return true end end
         return false
     end
     local function nameKey(value) return string.lower(value):gsub("[^%w]","") end
     local function shiftScore(b)
-        if not externalButton(b) then return 0 end
+        if not externalButton(b) or b==nativeJump() then return 0 end
         local name=nameKey(b.Name)
         if name=="shiftlock" or name=="shiftlockbutton" or name=="mouselock" or name=="mouselockbutton" or name=="shiftlockicon" then return 4 end
         if b:IsA("ImageButton") then
@@ -1246,17 +1266,27 @@ do
         end
         return 0
     end
-    local function resolveSelector()
-        if not T.selector then return end
-        for _,root in ipairs(roots()) do if root.key==T.selector.root then
+    local function resolveSelector(selector)
+        if not selector then return end
+        for _,root in ipairs(roots()) do if root.key==selector.root then
             local object=root.object
-            for _,name in ipairs(T.selector.path) do object=object and object:FindFirstChild(name) end
+            for i,name in ipairs(selector.path) do
+                local ordinal=selector.indices and selector.indices[i] or 1
+                if ordinal==1 then object=object and object:FindFirstChild(name)
+                elseif object then
+                    local found,count=nil,0
+                    for _,child in ipairs(object:GetChildren()) do if child.Name==name then
+                        count=count+1;if count==ordinal then found=child;break end
+                    end end
+                    object=found
+                end
+            end
             if externalButton(object) then return object end
         end end
     end
     local displayed
     local function findShift()
-        local explicit=resolveSelector();if explicit then return explicit end
+        local explicit=resolveSelector(T.selector);if explicit and explicit~=nativeJump() then return explicit end
         local current=T.entries.shift.record
         if current and externalButton(current.button) and displayed(current.button) then return current.button end
         local now=os.clock()
@@ -1265,7 +1295,7 @@ do
                 T.scanQueued=true;local generation=T.generation
                 task.delay(T.nextScan-now,function()
                     if generation~=T.generation then return end
-                    T.scanQueued=false;T.Queue()
+                    T.scanQueued=false;T.Queue("shift")
                 end)
             end
             return current and externalButton(current.button) and current.button or nil
@@ -1304,12 +1334,12 @@ do
     end
     function T.Draw()
         for _,entry in pairs(T.entries) do
-            local r=entry.record;local visible=T.editing and cfg[entry.enabled] and r and displayed(r.button)
-            entry.handle.Visible=not not visible
+            local r=entry.record;local visible=T.editing and enabled(entry) and r and displayed(r.button)
+            write(entry.handle,"Visible",not not visible)
             if visible then
                 local point=r.button.AbsolutePosition-layer.AbsolutePosition
-                entry.handle.Position=UDim2.fromOffset(point.X,point.Y)
-                entry.handle.Size=UDim2.fromOffset(r.button.AbsoluteSize.X,r.button.AbsoluteSize.Y)
+                write(entry.handle,"Position",UDim2.fromOffset(point.X,point.Y))
+                write(entry.handle,"Size",UDim2.fromOffset(r.button.AbsoluteSize.X,r.button.AbsoluteSize.Y))
             end
         end
     end
@@ -1320,7 +1350,7 @@ do
         local width=r.size.X.Scale*view.X+r.size.X.Offset
         local height=r.size.Y.Scale*view.Y+r.size.Y.Offset
         if view.X<=0 or view.Y<=0 or screen.X<=0 or screen.Y<=0 or width<=0 or height<=0 then status(entry,"Status: aguardando tamanho da tela");return end
-        local factor=math.min(cfg[entry.scale],screen.X/width,screen.Y/height)
+        local factor=math.min(scaleOf(entry),screen.X/width,screen.Y/height)
         local anchor=r.button.AnchorPoint
         local w,h=width*factor,height*factor
         local saved=T.positions[key]
@@ -1345,40 +1375,73 @@ do
         r.writing=false
         status(entry,string.format("Status: %.2fx | %.0f x %.0f px",factor,w,h))
     end
-    function T.Queue()
-        if T.queued or not T.running then return end
+    function T.Queue(key)
+        if not T.running then return end
+        if type(key)=="string" then T.dirty=T.dirty or {};T.dirty[key]=true else T.fullRefresh=true end
+        if T.queued then return end
         T.queued=true;local generation=T.generation
         task.defer(function()
             if generation~=T.generation then return end
-            T.queued=false;if state.alive and T.running then T.Refresh() end
+            T.queued=false
+            local dirty
+            if not T.fullRefresh then dirty=T.dirty end
+            T.dirty=nil;T.fullRefresh=nil
+            if state.alive and T.running then T.Refresh(dirty) end
         end)
     end
-    function T.Bind(entry,b)
-        if entry.record and entry.record.button==b then return end
-        T.Release(entry)
-        if not b then return end
-        local r={button=b,size=b.Size,position=b.Position,connections={}};entry.record=r
+    function T.Bind(key,entry,b)
+        local r=entry.record
+        if r and r.button==b and r.parent==b.Parent then return end
+        if not r or r.button~=b then
+            T.Release(entry)
+            if not b then return end
+            r={button=b,size=b.Size,position=b.Position,connections={}};entry.record=r
+        else disconnect(r.connections) end
+        r.parent=b.Parent
+        local function queue() T.Queue(key) end
         local function geometry(property)
             if r.writing or entry.record~=r then return end
-            if property=="Size" and b.Size~=r.appliedSize then r.size=b.Size end
-            if property=="Position" and b.Position~=r.appliedPosition then r.position=b.Position end
-            T.Queue()
+            local value=b[property]
+            if value==r["applied"..property] then return end
+            r[property=="Size" and "size" or "position"]=value;queue()
         end
         r.connections={b:GetPropertyChangedSignal("Size"):Connect(function() geometry("Size") end),
             b:GetPropertyChangedSignal("Position"):Connect(function() geometry("Position") end),
-            b:GetPropertyChangedSignal("AnchorPoint"):Connect(T.Queue),
-            b.Parent:GetPropertyChangedSignal("AbsoluteSize"):Connect(T.Queue)}
+            b:GetPropertyChangedSignal("AnchorPoint"):Connect(queue),b:GetPropertyChangedSignal("Parent"):Connect(queue),
+            b.Parent:GetPropertyChangedSignal("AbsoluteSize"):Connect(queue),
+            b.Parent:GetPropertyChangedSignal("AbsolutePosition"):Connect(queue)}
     end
-    function T.Refresh()
-        for key,entry in pairs(T.entries) do
-            if cfg[entry.enabled] then
-                local b
-                if key=="jump" then b=nativeJump() else b=findShift() end
-                T.Bind(entry,b)
-                if entry.record then T.Apply(key,entry)
-                else status(entry,key=="shift" and "Status: toque em Selecionar Shift Lock" or "Status: aguardando botao nativo de pulo") end
-            else T.Release(entry);status(entry,"Status: desligado") end
+    function T.Refresh(dirty)
+        local occupied={}
+        for _,key in ipairs({"jump","shift"}) do
+            local entry=T.entries[key]
+            if not dirty or dirty[key] then
+                if enabled(entry) then
+                    local b=key=="jump" and nativeJump() or nil
+                    if key=="shift" then b=findShift() end
+                    -- Hand ownership back before capturing the native base of an aliased control.
+                    if b then for _,id in ipairs(T.customKeys) do
+                        local custom=T.entries[id]
+                        if custom.record and custom.record.button==b then T.Release(custom) end
+                    end end
+                    T.Bind(key,entry,b)
+                    if entry.record then T.Apply(key,entry)
+                    else status(entry,key=="shift" and "Status: toque em Selecionar Shift Lock" or "Status: aguardando botao nativo de pulo") end
+                else T.Release(entry);status(entry,"Status: desligado") end
+            end
+            if entry.record then occupied[entry.record.button]=true end
         end
+        for _,key in ipairs(T.customKeys) do
+            local entry=T.entries[key];local r=entry.record
+            if not dirty or dirty[key] then
+                local b=r and externalButton(r.button) and r.button or resolveSelector(entry.selector)
+                if occupied[b] or b==nativeJump() then b=nil end
+                T.Bind(key,entry,b)
+                if entry.record then T.Apply(key,entry) else status(entry,"Status: aguardando o botao selecionado") end
+            end
+            if entry.record then occupied[entry.record.button]=true end
+        end
+        if T.selectedKey and T.entries[T.selectedKey] then T.Select(T.selectedKey) end
         T.Draw()
     end
     local function cancelDrag()
@@ -1395,27 +1458,32 @@ do
         finish.Text="Arraste os botoes | CONCLUIR"
     end
     function T.Stop()
-        T.running=false;T.generation=T.generation+1;T.queued=false;T.nextScan=nil;T.scanQueued=false
+        T.running=false;T.generation=T.generation+1;T.queued=false;T.dirty=nil;T.fullRefresh=nil;T.nextScan=nil;T.scanQueued=false
         T.EndEditor();T.CancelPicker();disconnect(T.connections);T.connections={};T.scopes=nil
         for _,entry in pairs(T.entries) do T.Release(entry);status(entry,"Status: desligado") end
     end
     function T.Configure()
-        if not state.alive or not (cfg.resizeJumpButton or cfg.resizeShiftLock) then T.Stop();return end
+        if not state.alive or not (cfg.resizeJumpButton or cfg.resizeShiftLock or #T.customKeys>0) then T.Stop();return end
         if not Input.TouchEnabled then
-            T.Stop();for _,entry in pairs(T.entries) do if cfg[entry.enabled] then status(entry,"Status: disponivel em dispositivos com toque") end end
+            T.Stop();for _,entry in pairs(T.entries) do if enabled(entry) then status(entry,"Status: disponivel em dispositivos com toque") end end
             return
         end
         if not T.running then
             T.running=true;T.scopes=roots()
             local function changed(object)
                 if object==gui or object:IsDescendantOf(gui) then return end
-                for _,entry in pairs(T.entries) do
-                    if entry.record and (object==entry.record.button or entry.record.button:IsDescendantOf(object)) then T.Queue();return end
+                for key,entry in pairs(T.entries) do
+                    if entry.record and (object==entry.record.button or entry.record.button:IsDescendantOf(object)) then T.Queue(key) end
+                end
+                if #T.customKeys>0 and (object:IsA("GuiBase2d") or object:IsA("PlayerGui")) then
+                    for _,key in ipairs(T.customKeys) do if not T.entries[key].record then T.Queue(key) end end
                 end
                 if object.Name=="JumpButton" or object.Name=="TouchControlFrame" or object.Name=="TouchGui" or object:IsA("PlayerGui")
                     or (cfg.resizeShiftLock and (not T.entries.shift.record or not displayed(T.entries.shift.record.button)) and object:IsA("GuiButton")) then T.Queue() end
             end
-            T.connections={player.DescendantAdded:Connect(changed),player.DescendantRemoving:Connect(changed)}
+            T.connections={player.DescendantAdded:Connect(changed),player.DescendantRemoving:Connect(changed),
+                layer:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() T.Queue() end),
+                layer:GetPropertyChangedSignal("AbsolutePosition"):Connect(function() T.Queue() end)}
             for _,root in ipairs(T.scopes) do if root.key~="player" then
                 local ok,a,b=pcall(function() return root.object.DescendantAdded:Connect(changed),root.object.DescendantRemoving:Connect(changed) end)
                 if ok then T.connections[#T.connections+1]=a;T.connections[#T.connections+1]=b end
@@ -1428,8 +1496,8 @@ do
         if not Input.TouchEnabled then notify("O editor e para os botoes de toque.");return end
         T.CancelPicker();T.Configure()
         local found=false
-        for _,entry in pairs(T.entries) do if cfg[entry.enabled] and entry.record and displayed(entry.record.button) then found=true end end
-        if not found then notify("Ative o ajuste de um botao visivel. Para Shift Lock, use Selecionar Shift Lock se necessario.");return end
+        for _,entry in pairs(T.entries) do if enabled(entry) and entry.record and displayed(entry.record.button) then found=true end end
+        if not found then notify("Ative pulo/Shift Lock ou selecione um botao visivel para editar.");return end
         T.editing=true;layer.Visible=true;API.TouchEditButton.Text="Concluir edicao"
         show(false);T.Draw();T.editorConnection=Run.RenderStepped:Connect(T.Draw)
     end
@@ -1438,21 +1506,32 @@ do
     end
     local function selectorFor(b)
         for _,root in ipairs(roots()) do if b:IsDescendantOf(root.object) then
-            local path,object={},b
-            while object and object~=root.object do table.insert(path,1,object.Name);object=object.Parent end
-            if object then return {root=root.key,path=path} end
+            local path,indices,object={},{},b
+            while object and object~=root.object do
+                local ordinal=0
+                for _,child in ipairs(object.Parent:GetChildren()) do if child.Name==object.Name then
+                    ordinal=ordinal+1;if child==object then break end
+                end end
+                table.insert(path,1,object.Name);table.insert(indices,1,ordinal);object=object.Parent
+            end
+            if object then return {root=root.key,path=path,indices=indices} end
         end end
     end
     local function underPointer(point)
-        local candidates,seen={},{}
-        local function add(object)
+        local candidates,seen,ranks,orders={},{},{},{}
+        local function add(object,rank)
             local b=object
             while b and not b:IsA("GuiButton") do b=b.Parent end
-            if externalButton(b) and not seen[b] and displayed(b) then seen[b]=true;candidates[#candidates+1]=b end
+            if externalButton(b) and not seen[b] and displayed(b) then
+                seen[b]=true;candidates[#candidates+1]=b
+                local screen=b.Parent;while screen and not screen:IsA("ScreenGui") do screen=screen.Parent end
+                ranks[b]={display=screen and screen.DisplayOrder or 0,stack=rank or math.huge,z=b.ZIndex or 1}
+                orders[b]=#candidates
+            end
         end
         for _,root in ipairs(roots()) do
             local ok,objects=pcall(function() return root.object:GetGuiObjectsAtPosition(point.X,point.Y) end)
-            if ok then for _,object in ipairs(objects) do if not object:IsDescendantOf(gui) then add(object) end end
+            if ok then for rank,object in ipairs(objects) do if not object:IsDescendantOf(gui) then add(object,rank) end end
             else
                 local scanned,list=pcall(function() return root.object:GetDescendants() end)
                 if scanned then for _,b in ipairs(list) do if externalButton(b) and displayed(b) then
@@ -1462,48 +1541,48 @@ do
             end
         end
         table.sort(candidates,function(a,b)
-            local aa,bb=shiftScore(a),shiftScore(b)
-            if aa~=bb then return aa>bb end
-            return a.AbsoluteSize.X*a.AbsoluteSize.Y<b.AbsoluteSize.X*b.AbsoluteSize.Y
+            if T.pickMode=="shift" then
+                local aa,bb=shiftScore(a),shiftScore(b)
+                if aa~=bb then return aa>bb end
+            end
+            local aa,bb=ranks[a],ranks[b]
+            if aa.display~=bb.display then return aa.display>bb.display end
+            if aa.stack~=bb.stack then return aa.stack<bb.stack end
+            if aa.z~=bb.z then return aa.z>bb.z end
+            local areaA,areaB=a.AbsoluteSize.X*a.AbsoluteSize.Y,b.AbsoluteSize.X*b.AbsoluteSize.Y
+            if areaA~=areaB then return areaA<areaB end
+            return orders[a]<orders[b]
         end)
         return candidates[1]
     end
-    function T.PickShiftLock()
+    local function pick(mode)
         if not Input.TouchEnabled then notify("A selecao e para botoes de toque.");return end
-        T.EndEditor();T.picking=true;picker.Visible=true;layer.Visible=true
+        T.EndEditor();T.pickMode=mode;T.picking=true;picker.Visible=true;layer.Visible=true
+        picker.Text=mode=="shift" and "Toque no botao Shift Lock que voce usa" or "Toque no botao do jogo que deseja ajustar"
         finish.Text="Cancelar selecao";show(false)
     end
+    function T.PickShiftLock() pick("shift") end
+    function T.PickButton() pick("custom") end
     local function copySelector(selector)
         if type(selector)~="table" or (selector.root~="player" and selector.root~="core" and selector.root~="hui") or type(selector.path)~="table" or #selector.path<1 or #selector.path>32 then return end
-        local result={root=selector.root,path={}}
-        for _,name in ipairs(selector.path) do if type(name)~="string" or #name<1 or #name>128 then return end;result.path[#result.path+1]=name end
-        return result
-    end
-    function T.ExportLayout()
-        local result={selector=copySelector(T.selector)}
-        for _,key in ipairs({"jump","shift"}) do local p=T.positions[key];if p then result[key]={p[1],p[2]} end end
-        return result
-    end
-    function T.ImportLayout(layout)
-        T.EndEditor();T.CancelPicker();T.positions={};T.selector=nil;T.nextScan=nil
-        T.Release(T.entries.shift)
-        if type(layout)=="table" then
-            T.selector=copySelector(layout.selector)
-            for _,key in ipairs({"jump","shift"}) do
-                local p=layout[key]
-                if type(p)=="table" and type(p[1])=="number" and type(p[2])=="number" and p[1]==p[1] and p[2]==p[2]
-                    and p[1]>=0 and p[1]<=1 and p[2]>=0 and p[2]<=1 then T.positions[key]={p[1],p[2]} end
-            end
+        local result={root=selector.root,path={},indices={}}
+        if selector.indices~=nil and type(selector.indices)~="table" then return end
+        for i,name in ipairs(selector.path) do
+            if type(name)~="string" or #name<1 or #name>128 then return end
+            local ordinal=selector.indices and selector.indices[i] or 1
+            if type(ordinal)~="number" or ordinal~=math.floor(ordinal) or ordinal<1 or ordinal>512 then return end
+            result.path[i]=name;result.indices[i]=ordinal
         end
-        T.Configure()
+        return result
     end
-    for key,entry in pairs(T.entries) do
+    function T.MakeHandle(key,entry)
         local id,current=key,entry
         current.handle=create("TextButton",{Name="Move_"..key,Text="ARRASTE\n"..entry.label,Font=Enum.Font.GothamBold,TextSize=12,
             TextColor3=colors.text,BackgroundColor3=accent,BackgroundTransparency=0.35,BorderSizePixel=0,Visible=false,Active=true,ZIndex=80},layer)
         round(current.handle,10)
-        listen(current.handle.InputBegan,function(input)
+        current.handleConnection=current.handle.InputBegan:Connect(function(input)
             if not T.editing or T.drag or not current.record or (input.UserInputType~=Enum.UserInputType.Touch and input.UserInputType~=Enum.UserInputType.MouseButton1) then return end
+            T.Select(id)
             local r=current.record;local start=input.Position
             local center=r.button.AbsolutePosition+r.button.AbsoluteSize*0.5
             T.drag=input
@@ -1517,23 +1596,143 @@ do
             end,function() if T.drag==input then T.drag=nil end end)
         end)
     end
+    for key,entry in pairs(T.entries) do T.MakeHandle(key,entry) end
+    function T.Select(key)
+        local entry=T.entries[key];T.selectedKey=entry and key or nil
+        if entry then
+            T.syncingSelection=true;set("selectedButtonScale",scaleOf(entry),true);T.syncingSelection=false
+        end
+        T.SelectedStatus()
+    end
+    function T.NextSelected()
+        local keys={}
+        for _,key in ipairs({"jump","shift"}) do if enabled(T.entries[key]) then keys[#keys+1]=key end end
+        for _,key in ipairs(T.customKeys) do keys[#keys+1]=key end
+        local index=0;for i,key in ipairs(keys) do if key==T.selectedKey then index=i;break end end
+        T.Select(keys[index%math.max(1,#keys)+1])
+    end
+    local function removeCustom(key)
+        local entry=T.entries[key];if not entry or not entry.custom then return end
+        T.Release(entry)
+        entry.handleConnection:Disconnect();entry.handle:Destroy()
+        T.entries[key]=nil;T.positions[key]=nil
+        for i,id in ipairs(T.customKeys) do if id==key then table.remove(T.customKeys,i);break end end
+    end
+    function T.RemoveSelected()
+        local key=T.selectedKey;local entry=T.entries[key];if not entry then return end
+        cancelDrag();T.positions[key]=nil
+        if entry.custom then removeCustom(key) else set(entry.enabled,false,true) end
+        T.selectedKey=nil;T.Configure();T.NextSelected()
+    end
+    function T.ClearSelected()
+        T.EndEditor()
+        for i=#T.customKeys,1,-1 do removeCustom(T.customKeys[i]) end
+        T.Select(nil);T.Configure()
+    end
+    local function sameSelector(a,b)
+        if a.root~=b.root or #a.path~=#b.path then return false end
+        for i,name in ipairs(a.path) do
+            if name~=b.path[i] or (a.indices and a.indices[i] or 1)~=(b.indices and b.indices[i] or 1) then return false end
+        end
+        return true
+    end
+    local function addCustom(selector,factor)
+        if #T.customKeys>=32 then return end
+        for _,key in ipairs(T.customKeys) do if sameSelector(T.entries[key].selector,selector) then return end end
+        T.serial=T.serial+1;local key="custom"..T.serial
+        local entry={label=selector.path[#selector.path],custom=true,selector=selector,factor=factor}
+        T.entries[key]=entry;T.customKeys[#T.customKeys+1]=key;T.MakeHandle(key,entry)
+        return key
+    end
+    function T.AddButton(b)
+        if not externalButton(b) then return end
+        local key
+        if b==nativeJump() then key="jump"
+        elseif T.entries.shift.record and T.entries.shift.record.button==b or shiftScore(b)>=4 then key="shift" end
+        if key then
+            for i=#T.customKeys,1,-1 do
+                local id=T.customKeys[i];local entry=T.entries[id]
+                if entry.record and entry.record.button==b or resolveSelector(entry.selector)==b then removeCustom(id) end
+            end
+            if key=="shift" then T.Release(T.entries.shift);T.selector=selectorFor(b) end
+            set(T.entries[key].enabled,true,true)
+        else
+            for _,id in ipairs(T.customKeys) do
+                local entry=T.entries[id]
+                if entry.record and entry.record.button==b or resolveSelector(entry.selector)==b then key=id;break end
+            end
+            if not key then local selector=selectorFor(b);if selector then key=addCustom(selector,1) end end
+        end
+        if not key then notify("Limite de 32 botoes selecionados. Remova um para escolher outro.");return end
+        T.Select(key);T.Configure();return key
+    end
+    local function copyPosition(p)
+        if type(p)=="table" and type(p[1])=="number" and type(p[2])=="number" and p[1]==p[1] and p[2]==p[2]
+            and p[1]>=0 and p[1]<=1 and p[2]>=0 and p[2]<=1 then return {p[1],p[2]} end
+    end
+    function T.ExportLayout()
+        local result={selector=copySelector(T.selector),custom={}}
+        for _,key in ipairs({"jump","shift"}) do result[key]=copyPosition(T.positions[key]) end
+        for _,key in ipairs(T.customKeys) do
+            local entry=T.entries[key]
+            local selector=entry.record and selectorFor(entry.record.button) or entry.selector
+            result.custom[#result.custom+1]={selector=copySelector(selector),scale=entry.factor,position=copyPosition(T.positions[key])}
+        end
+        return result
+    end
+    function T.ImportLayout(layout)
+        T.Stop()
+        for i=#T.customKeys,1,-1 do removeCustom(T.customKeys[i]) end
+        T.Select(nil);T.positions={};T.selector=nil
+        if type(layout)=="table" then
+            T.selector=copySelector(layout.selector)
+            for _,key in ipairs({"jump","shift"}) do T.positions[key]=copyPosition(layout[key]) end
+            if type(layout.custom)=="table" then for i=1,math.min(32,#layout.custom) do
+                local data=layout.custom[i]
+                if type(data)=="table" then
+                    local selector=copySelector(data.selector);local factor=data.scale
+                    if selector and type(factor)=="number" and factor==factor and math.abs(factor)~=math.huge then
+                        local key=addCustom(selector,math.clamp(factor,0.5,3));if key then T.positions[key]=copyPosition(data.position) end
+                    end
+                end
+            end end
+        end
+        T.Configure();T.NextSelected()
+    end
+    function T.Destroy()
+        T.Stop()
+        for _,entry in pairs(T.entries) do if entry.handleConnection then entry.handleConnection:Disconnect() end end
+    end
     listen(finish.Activated,function() if T.picking then T.CancelPicker() else T.EndEditor() end;show(true) end)
     listen(picker.InputBegan,function(input)
         if not T.picking or (input.UserInputType~=Enum.UserInputType.Touch and input.UserInputType~=Enum.UserInputType.MouseButton1) then return end
         local b=underPointer(input.Position)
-        if not b then notify("Toque no centro do botao Shift Lock; Cancelar volta ao painel.");return end
-        local selector=selectorFor(b);if not selector then return end
-        T.Release(T.entries.shift);T.selector=selector
-        T.CancelPicker();set("resizeShiftLock",true,true);T.Configure();show(true)
-        notify("Shift Lock selecionado. Ajuste a escala ou use Editar posicoes.")
+        if not b then notify("Toque no centro de um botao; Cancelar volta ao painel.");return end
+        local mode=T.pickMode
+        if mode=="shift" and b==nativeJump() then notify("Esse e o botao de pulo. Escolha o Shift Lock.");return end
+        T.CancelPicker()
+        if mode=="shift" then
+            for i=#T.customKeys,1,-1 do
+                local key=T.customKeys[i];local entry=T.entries[key]
+                if entry.record and entry.record.button==b or resolveSelector(entry.selector)==b then removeCustom(key) end
+            end
+            T.Release(T.entries.shift);T.selector=selectorFor(b)
+            set("resizeShiftLock",true,true);T.Select("shift");T.Configure()
+        else T.AddButton(b) end
+        show(true);notify("Botao selecionado. Ajuste Tamanho do selecionado ou use Editar posicoes.")
     end)
+    actions.selectedButtonScale=function(value)
+        if T.syncingSelection then return end
+        local entry=T.entries[T.selectedKey];if not entry then return end
+        if entry.custom then entry.factor=value;T.Queue(T.selectedKey)
+        else set(entry.scale,value,true) end
+    end
     actions.resizeJumpButton=T.Configure;actions.jumpButtonScale=T.Configure
     actions.resizeShiftLock=T.Configure;actions.shiftLockScale=T.Configure
-    listen(Input:GetPropertyChangedSignal("TouchEnabled"),function() if cfg.resizeJumpButton or cfg.resizeShiftLock then T.Configure() end end)
+    listen(Input:GetPropertyChangedSignal("TouchEnabled"),function() if cfg.resizeJumpButton or cfg.resizeShiftLock or #T.customKeys>0 then T.Configure() end end)
     listen(Input.WindowFocusReleased,function() if T.editing or T.picking then T.EndEditor();T.CancelPicker();show(true) end end)
 end
 -- End mobile button layout controls.
-
 
 -- Visual performance changes are cancellable, batched, and reversible.
 local perfToken,perfQueued,perfCache=0,false,nil
@@ -4227,7 +4426,7 @@ function API.Destroy()
     if API.UI then API.UI.Stop() end
     if API.Loading then API.Loading.Stop() end
     if API.QuickActions then API.QuickActions.Stop() end
-    if API.JumpButtonSize then API.JumpButtonSize.Stop() end
+    if API.TouchControls then API.TouchControls.Destroy() end
     if API.LockOn then API.LockOn.Stop() end
     if API.ConfigUI then API.ConfigUI.Stop() end
     for input in pairs(pointerSessions) do pointerSessions[input]=nil end
