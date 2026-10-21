@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.21
+-- Huss Valley Panel 0.6.22
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -54,7 +54,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.21", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.22", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -1895,38 +1895,56 @@ do
         if not ok then M.cursorFailures=(M.cursorFailures or 0)+1 end
         return ok
     end
+    function M.PlaceFreeCursor()
+        local ok,point=pcall(Input.GetMouseLocation,Input)
+        if not ok or not point or point.X~=point.X or point.Y~=point.Y
+            or math.abs(point.X)==math.huge or math.abs(point.Y)==math.huge then return false end
+        put(marker,"Position",UDim2.fromOffset(point.X,point.Y))
+        return true
+    end
     local function drawCursor(captured)
         local global=cfg.mobiladorCursorScope=="Sempre"
         local wanted=not not (state.alive and not M.cursorDestroyed and not state.booting and M.cursorFocused and cfg.mobiladorReticle
-            and (Input.MouseEnabled or Input.KeyboardEnabled or M.seenMouse)
+            and (Input.MouseEnabled or Input.KeyboardEnabled or M.seenMouse or M.cursorSeenMouse)
             and (global or captured and M.running and cfg.mobilador))
         if wanted and M.markerDirty then M.DrawMarker() end
         if wanted then
             local center=not global or Input.MouseBehavior==Enum.MouseBehavior.LockCenter
             if center then put(marker,"Position",UDim2.fromScale(0.5,0.5))
-            else
-                local ok,point=pcall(Input.GetMouseLocation,Input)
-                if ok and point and point.X==point.X and point.Y==point.Y and math.abs(point.X)<math.huge and math.abs(point.Y)<math.huge then
-                    put(marker,"Position",UDim2.fromOffset(point.X,point.Y))
-                else wanted=false end
-            end
+            else wanted=M.PlaceFreeCursor() end
         end
         if wanted then wanted=M.CursorIcon(false)
         elseif M.running and M.cursorFocused then M.CursorIcon(not captured)
         else M.CursorIcon(nil) end
         if markerGui.Enabled~=wanted then markerGui.Enabled=wanted end
     end
+    function M.SuspendCursor()
+        if M.cursorFault then return end
+        M.cursorFault=true;M.CursorIcon(nil);pcall(function() markerGui.Enabled=false end)
+        notify("Cursor personalizado indisponivel; ponteiro original restaurado. Mude um ajuste para tentar novamente.")
+    end
     function M.SetMarker(captured)
         if M.cursorFault then return end
-        if not pcall(drawCursor,captured) then
-            M.cursorFault=true;M.CursorIcon(nil);pcall(function() markerGui.Enabled=false end)
-            notify("Cursor personalizado indisponivel; ponteiro original restaurado. Mude um ajuste para tentar novamente.")
-        end
+        if not pcall(drawCursor,captured) then M.SuspendCursor() end
     end
     function M.UpdateCursor()
         M.SetMarker(M.running and M.target~=Enum.MouseBehavior.Default and Input.MouseBehavior==Enum.MouseBehavior.LockCenter
             and M.CameraAllowed(workspace.CurrentCamera,M.hum,M.root) and not M.Blocked())
     end
+    function M.CursorMoved(input)
+        if input.UserInputType~=Enum.UserInputType.MouseMovement or not state.alive or M.cursorDestroyed then return end
+        M.cursorSeenMouse=true
+        if not cfg.mobiladorReticle or M.cursorFault or (M.cursorFailures or 0)>=3 or not M.cursorFocused or state.booting then return end
+        -- Position only: no styling, camera input, interpolation or pointer capture in this fast path.
+        if markerGui.Enabled then
+            if Input.MouseBehavior==Enum.MouseBehavior.LockCenter or cfg.mobiladorCursorScope~="Sempre" then
+                put(marker,"Position",UDim2.fromScale(0.5,0.5))
+            elseif M.PlaceFreeCursor() then M.cursorEventSamples=(M.cursorEventSamples or 0)+1 end
+        elseif cfg.mobiladorCursorScope=="Sempre" then M.UpdateCursor() end
+    end
+    M.cursorConnection=listen(Input.InputChanged,function(input)
+        if input.UserInputType==Enum.UserInputType.MouseMovement and not pcall(M.CursorMoved,input) then M.SuspendCursor() end
+    end)
     M.imageConnection=image:GetPropertyChangedSignal("IsLoaded"):Connect(function()
         M.markerDirty=true
         M.UpdateCursor()
@@ -2512,7 +2530,9 @@ do
         Run:UnbindFromRenderStep(binding);Run:UnbindFromRenderStep(finalBinding);M.Status("DESLIGADO","desligado")
     end
     function M.Destroy()
-        M.cursorDestroyed=true;M.Stop();M.CursorIcon(nil);if M.imageConnection then M.imageConnection:Disconnect();M.imageConnection=nil end;markerGui:Destroy()
+        M.cursorDestroyed=true
+        if M.cursorConnection then M.cursorConnection:Disconnect();M.cursorConnection=nil end
+        M.Stop();M.CursorIcon(nil);if M.imageConnection then M.imageConnection:Disconnect();M.imageConnection=nil end;markerGui:Destroy()
     end
     function M.Configure()
         if M.resolvingKeys then return end
@@ -2579,6 +2599,7 @@ do
             leftDown=M.leftDown,manualOnly=cfg.mobiladorManual,captureKey=cfg.mobiladorShiftKey,
             markerEnabled=markerGui.Enabled,markerSize=cfg.mobiladorReticleSize,markerStyle=cfg.mobiladorReticleStyle,
             customImageLoaded=image.IsLoaded==true,cursorScope=cfg.mobiladorCursorScope,cursorFailures=M.cursorFailures,cursorSuspended=M.cursorFault==true,
+            cursorUpdateMode="InputChanged + render",cursorEventSamples=M.cursorEventSamples or 0,
             nativeShift=M.nativeLocked,nativeShiftKnown=M.nativeKnown,bridgeStatus=M.bridgeStatus,bridgeCalls=M.bridge and M.bridge.calls or 0,
             bridgeSource=M.bridge and M.bridge.source or "none",inputSource=M.inputSource or "none",menuKey=cfg.toggleKey,shiftKeysReserved=true,
             freeRequested=M.ExplicitFree(),keyDown=M.keyDown,modalOverrides=M.modalCount or 0,finalCapturePass=true,

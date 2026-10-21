@@ -1,6 +1,18 @@
 # Huss Valley Panel
 
-Versão 0.6.21 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.22 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Resposta do cursor personalizado na versão 0.6.22
+
+Use o mesmo loader e confira **v0.6.22**. O cursor livre agora recebe atualização de posição também no evento MouseMovement de InputChanged, sem esperar pela próxima chamada de renderização do painel. O caminho de renderização existente continua como reserva, inclusive para mudanças de posição que cheguem sem evento. A reprodução contra a v0.6.21 mostrou que, antes, a posição da interface permanecia antiga entre o evento e a etapa de renderização. Isso identifica uma espera no código, sem medir a latência física percebida no aparelho.
+
+O caminho rápido lê a posição atual com GetMouseLocation e altera somente a posição do marcador quando ela mudou. Não reconstrói os estilos nem aplica tween, interpolação, previsão ou soma de deltas. Conserva o sistema de coordenadas do canvas existente, em vez de misturar posição de outro tipo de InputObject ou coordenadas com inset diferente. Referências: [UserInputService.GetMouseLocation](https://create.roblox.com/docs/reference/engine/classes/UserInputService/GetMouseLocation), [InputObject.Position e atualização dos eventos](https://create.roblox.com/docs/reference/engine/classes/InputObject).
+
+A atualização por evento é independente da captura: o cursor global acompanha o ponteiro com Mobilador desligado, sobre o painel e depois de soltar V. Toque e teclado não movimentam o cursor de mouse. Durante LockCenter, o marcador fica no centro; So na captura mantém seu escopo. Ponto, cruz, círculo, cruz com ponto, imagem e fallback mantêm os estilos anteriores. Uma presença real de mouse pode ser reconhecida para o desenho mesmo quando as flags híbridas do cliente ainda não informam mouse/teclado; isso não liga a captura.
+
+Não foi acrescentado loop de renderização. O listener de cursor é desconectado ao encerrar o painel. O caminho rápido não escreve MouseBehavior, sensibilidade, movimento de câmera ou eventos de entrada. Valores inválidos são ignorados; uma falha inesperada de desenho restaura o cursor original e suspende somente o desenho, com reativação pelos ajustes existentes. O diagnóstico informa InputChanged + render e o número de amostras atendidas pelo caminho de evento, sem apresentar uma medição de atraso de tela.
+
+O script completo compilou no Luau oficial. Passaram **48 casos de comportamento atuais**, mais **uma reprodução da v0.6.21**, com **325 asserções no total**, além da sintaxe. Incluem posição atualizada antes do render, uma atribuição por posição alterada sem reconstrução de estilo, nenhuma atribuição com ponteiro parado, todos os estilos, eventos sem render, reserva sem evento, V/Shift, pan normal após liberação, foco, desativação, falhas e limpeza. Passaram também **709 asserções** existentes de câmera/ações nativas/FPS e **412** de editor de botões/propriedades. A lógica de captura, integração nativa e devolução de câmera da v0.6.21 foi comparada sem alterações; Lock On, ESP, ações de jogo, gráficos, botões e dispatcher principal também ficaram iguais. O ganho de latência visual no Roblox/Delta ainda precisa ser conferido no aparelho; não foi medido em milissegundos.
 
 ## Devolver a câmera ao jogo ao soltar V na versão 0.6.21
 
@@ -558,6 +570,7 @@ As opções começam desligadas. O ESP possui frequência de dados e distância 
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
 
 Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
+
 
 
 
