@@ -1,6 +1,22 @@
 # Huss Valley Panel
 
-Versão 0.6.19 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.20 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Captura real do ponteiro e soltura por V na versão 0.6.20
+
+Use o mesmo loader e confira **v0.6.20**. Em **World > Mobilador / mouse**, mantenha **Somente a tecla prende** e **Entrada nativa sem clicar** ligados. V alterna entre pedir captura e pedir cursor livre, sem usar o esquerdo. F4 continua abrindo o painel. No modo somente tecla, **F8 / Recuperar mouse agora** limpa a captura antiga e mantém o cursor livre; outra pressão de V pode capturar novamente. As teclas personalizadas válidas continuam sendo usadas.
+
+O teste no aparelho confirmou que a versão anterior gira sem o esquerdo, mas relatou ponteiro ainda livre/com borda e V que não solta. Esta revisão reproduziu dois caminhos possíveis contra a versão publicada: perder InputEnded quando IsKeyDown nunca informa true deixa o debounce de V preso; um GuiButton modal permite que o giro adicional funcione enquanto a captura física é sobreposta. Isso não confirma quais desses caminhos ocorrem nesse Delta. A documentação da Roblox informa que um botão visível com Modal=true pode sobrepor MouseBehavior, mesmo quando o código pede LockCenter: [UserInputService.MouseBehavior](https://create.roblox.com/docs/reference/engine/classes/UserInputService/MouseBehavior).
+
+A recuperação do estado pressionado de V agora aceita uma leitura false após 200 ms, mesmo sem ter observado true antes. Um evento real de soltura rearma a tecla imediatamente; uma tecla reconhecida como mantida continua sem alternar por eventos Began repetidos. A segunda pressão de V registra uma escolha explícita de cursor livre, reaplica Default e interrompe a rotação adicional. Esse pedido não é reinterpretado como um Shift antigo por causa de LockCenter residual ou de um estado nativo que continuou ligado. Uma nova pressão de Shift no teclado, ou uma mudança real do estado de Shift nativo acessível, devolve essa política ao jogo. Antes de escolher V, o comportamento inicial continua cedendo ao jogo.
+
+A captura/liberação recebe uma reconciliação adicional em RenderPriority.Last+1, depois da etapa de entrada e da câmera. Ela trata escritores de MouseBehavior que executam depois da etapa principal do painel; não atribui CFrame, Focus ou zoom. A captura também faz uma única transição Default→LockCenter ao ativar, e pode renová-la quando uma nova interferência modal é removida. O movimento pendente é limpo nessas transições para não transformar o reposicionamento do ponteiro em giro. Ao desligar, um LockCenter de origem desconhecida não é restaurado como se fosse uma captura nativa confirmada. Uma política externa mais recente que já substituiu a escrita do painel é preservada.
+
+Enquanto há captura explicitamente pedida e a câmera é elegível, o módulo observa GuiButtons acessíveis em Player/CoreGui/gethui e suspende apenas a flag Modal. Isso permite que LockCenter seja aplicado sem exigir um clique direito/esquerdo. Ativação, cliques, visibilidade, hierarquia, controles do personagem e ações do jogo não são substituídos. As flags pertencentes ao módulo são restauradas ao liberar, abrir menus/digitar, perder foco, ceder a câmera ou desligar. Botões adicionados ou que mudam a flag são tratados por eventos; remoção desconecta o registro. A descoberta inicial é dividida em lotes durante a entrada em captura, sem varredura por quadro. Gerações antigas são canceladas; falhas por botão têm limite de tentativas. O Shift nativo usado sozinho não ativa essa suspensão de flags.
+
+O diagnóstico inclui pedido explícito de liberação, estado pressionado da tecla, correções na etapa final, número de flags modais suspensas, posição observada do ponteiro e mudanças de posição enquanto LockCenter era solicitado. Um cursor desenhado no centro ou uma propriedade que retorna LockCenter não provam que o Android adquiriu captura física. Se o Delta/Android continuar limitando o movimento ou não encaminhar entrada relativa, Lua não remove sozinho essa limitação nativa. Esta revisão corrige os caminhos acessíveis pelo script e mantém dados para distinguir o caso restante. Não envia cliques, teclas ou movimentos virtuais.
+
+O script completo compilou no Luau oficial. Passaram **23 casos de comportamento da revisão**, mais **duas reproduções contra a v0.6.19**, com **155 asserções no total**, além da sintaxe. Foram exercitados V repetido, End ausente, tecla mantida, escritor tardio, liberação explícita com Shift/primeira pessoa ativos, ponteiro modal atravessando larguras de tela em simulação, criação/remoção/recriação de UI, restauração, reinícios, foco, menus, recuperação, prioridades de câmera, ataques reais sem duplicação, ausência de giro parado, tentativas limitadas e limpeza. Passaram também **709 asserções** existentes de câmera/ações nativas/FPS e **412** de editor de botões/propriedades. Lock On, ESP, ações de jogo, gráficos, editor de botões, quick buttons e dispatcher principal foram comparados sem alterações. O teste físico no Roblox/Delta continua pendente.
 
 ## Entrada nativa da câmera e Shifts separados na versão 0.6.19
 
@@ -528,6 +544,7 @@ As opções começam desligadas. O ESP possui frequência de dados e distância 
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
 
 Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
+
 
 
 

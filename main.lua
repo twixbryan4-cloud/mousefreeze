@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.19
+-- Huss Valley Panel 0.6.20
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -54,7 +54,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.19", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.20", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -1010,6 +1010,7 @@ do
     API.MobiladorRecoverButton=actionButton(content,"Tecla de recuperacao",function() if API.Mobilador then API.Mobilador.BeginBind("mobiladorRecoverKey") end end)
     watch("mobiladorRecoverKey",function(v) API.MobiladorRecoverButton.Text="Recuperar: "..v.." (trocar)" end)
     actionButton(content,"Recuperar mouse agora",function() if API.Mobilador then API.Mobilador.Recover() end end)
+    text(content,"No modo somente tecla, Recuperar limpa a captura e deixa o cursor livre ate outra escolha.",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
     checkbox(content,"Aplicar em camera personalizada","mobiladorCustomCamera")
     checkbox(content,"Fixar multiplicador do mouse","mobiladorFixedSensitivity")
     slider(content,"Multiplicador do mouse","mobiladorSensitivity",0.1,3,0.05,"x")
@@ -1933,6 +1934,7 @@ do
     listen(Input.WindowFocusReleased,function() M.cursorFocused=false;M.SetMarker(false) end)
     listen(Input.WindowFocused,function() M.cursorFocused=true;M.UpdateCursor() end)
     local binding="HussValleyMobilador_"..player.UserId
+    local finalBinding=binding.."_Capture"
     local serviceOK,GuiService=pcall(function() return game:GetService("GuiService") end)
     if not serviceOK then GuiService=nil end
     local function finite(value) return type(value)=="number" and value==value and math.abs(value)~=math.huge end
@@ -1942,13 +1944,14 @@ do
         if r then pcall(function() if Input[property]==r.last and Input[property]~=r.base then Input[property]=r.base end end) end
     end
     function M.ReleaseAll()
+        M.SyncModals(false)
         M.SetMarker(false)
         M.ReleaseMouse();M.Release("MouseDeltaSensitivity")
     end
     local function applyProperty(property,value)
         local current=Input[property];local r=M.records[property]
         if not r then r={base=current};M.records[property]=r
-        elseif current~=r.last then r.base=current end
+        elseif current~=r.last and property~="MouseBehavior" then r.base=current end
         if current~=value then Input[property]=value end
         if Input[property]~=value then error("capture readback") end
         r.last=value
@@ -1976,9 +1979,111 @@ do
     end
     function M.ClearPresses(clearShift)
         M.rightHeld=false;M.rightToggle=false;M.rightDown=false;M.keyDown=false
-        M.rightSeenDown=false;M.keySeenDown=false;M.leftDown=false;M.rightPollAfter=nil;M.rightUpSince=nil
-        if clearShift then M.shift=false;M.nativeLocked=false end
+        M.rightSeenDown=false;M.keySeenDown=false;M.leftDown=false;M.rightPollAfter=nil;M.rightUpSince=nil;M.keyPressedAt=nil
+        if clearShift then M.shift=false;M.freeRequested=false;M.nativeLocked=false;M.capturePulse=nil end
         M.ResetMotion()
+    end
+    function M.ExplicitFree() return cfg.mobiladorManual and M.freeRequested==true end
+    function M.ReadNativeChoice()
+        local native,known=M.NativeLock()
+        if M.ExplicitFree() and known then
+            if M.freeNativeKnown and native~=M.freeNativeValue then
+                M.freeRequested=false;M.ResetMotion();M.ReleaseMouse();M.target=nil
+            else M.freeNativeKnown=true;M.freeNativeValue=native end
+        end
+        return native,known
+    end
+    function M.PollKey(now)
+        if not M.keyDown then return end
+        local ok,down=pcall(Input.IsKeyDown,Input,Enum.KeyCode[cfg.mobiladorShiftKey])
+        if ok and down then M.keySeenDown=true
+        elseif ok and (M.keySeenDown or now-(M.keyPressedAt or now)>=0.2) then
+            M.keyDown=false;M.keySeenDown=false;M.keyPressedAt=nil
+            M.stats.keyPollReleases=(M.stats.keyPollReleases or 0)+1
+        end
+    end
+    -- Only explicit capture suppresses modal pointer overrides. Restore each owned flag on release.
+    function M.SyncModals(wanted)
+        wanted=wanted==true
+        if M.modalActive==wanted then return end
+        M.modalActive=wanted;M.modalGeneration=(M.modalGeneration or 0)+1
+        for _,connection in ipairs(M.modalConnections or {}) do connection:Disconnect() end;M.modalConnections={}
+        for button,record in pairs(M.modalRecords or {}) do
+            if record.connection then record.connection:Disconnect() end
+            if record.base~=nil then pcall(function() if button.Modal==record.last then button.Modal=record.base end end) end
+        end
+        M.modalRecords={};M.modalCount=0
+        if not wanted then return end
+        local generation=M.modalGeneration
+        local function eligible()
+            return M.modalActive and generation==M.modalGeneration and M.running and state.alive
+                and not M.Blocked() and M.WantsCapture() and M.CameraAllowed(workspace.CurrentCamera,M.hum,M.root)
+        end
+        local function watchModal(button)
+            if not eligible() or M.modalRecords[button] then return end
+            local ok,isButton=pcall(function() return button:IsA("GuiButton") end)
+            if not ok or not isButton or not button.Parent then return end
+            local record={};M.modalRecords[button]=record
+            local function reconcile()
+                if record.writing or (record.failures or 0)>=3 or not eligible() then return end
+                local success=pcall(function()
+                    if button.Modal then
+                        record.base=true;record.writing=true
+                        button.Modal=false;record.last=false
+                        assert(button.Modal==false,"modal readback")
+                        if not record.counted then
+                            record.counted=true;M.modalCount=M.modalCount+1;M.capturePulse=true
+                        end
+                    end
+                end)
+                record.writing=false
+                if not success then
+                    record.failures=(record.failures or 0)+1;M.stats.modalFailures=(M.stats.modalFailures or 0)+1
+                    if record.failures>=3 and record.connection then record.connection:Disconnect() end
+                end
+            end
+            local linked,connection=pcall(function() return button:GetPropertyChangedSignal("Modal"):Connect(reconcile) end)
+            if linked then record.connection=connection end
+            reconcile()
+        end
+        local function removeModal(button)
+            local record=M.modalRecords[button];if not record then return end
+            M.modalRecords[button]=nil
+            if record.connection then record.connection:Disconnect() end
+            if record.base~=nil then pcall(function() if button.Modal==record.last then button.Modal=record.base end end) end
+            if record.counted then M.modalCount=math.max(0,M.modalCount-1) end
+        end
+        local roots,seen={},{}
+        local function add(root)
+            if not root or seen[root] then return end
+            seen[root]=true;roots[#roots+1]=root
+            local ok,connection=pcall(function() return root.DescendantAdded:Connect(watchModal) end)
+            if ok then M.modalConnections[#M.modalConnections+1]=connection end
+            local removed,link=pcall(function() return root.DescendantRemoving:Connect(removeModal) end)
+            if removed then M.modalConnections[#M.modalConnections+1]=link end
+        end
+        add(player)
+        local ok,core=pcall(game.GetService,game,"CoreGui");if ok then add(core) end
+        if type(gethui)=="function" then local got,root=pcall(gethui);if got then add(root) end end
+        task.spawn(function()
+            for _,root in ipairs(roots) do
+                if not eligible() then return end
+                local got,objects=pcall(root.GetDescendants,root)
+                if got then for i,object in ipairs(objects) do
+                    if not eligible() then return end
+                    watchModal(object)
+                    if i%300==0 then task.wait() end
+                end end
+            end
+        end)
+    end
+    function M.WriteCapture(value)
+        if M.capturePulse and value==Enum.MouseBehavior.LockCenter then
+            M.capturePulse=nil;M.ResetMotion();M.inputCaptured=nil
+            if not M.Write("MouseBehavior",Enum.MouseBehavior.Default) then M.mouseOwned=true;return false end
+            M.stats.capturePulses=(M.stats.capturePulses or 0)+1
+        end
+        local ok=M.Write("MouseBehavior",value);M.mouseOwned=true;return ok
     end
     -- Native camera input bridge. The camera controller remains the only writer of its pose.
     function M.DetachBridge()
@@ -2085,7 +2190,7 @@ do
         return Input.MouseBehavior==Enum.MouseBehavior.LockCenter and not M.mouseOwned,false
     end
     function M.EnsureNativeCapture(native,known)
-        if not native or not known or M.mouseOwned or Input.MouseBehavior==Enum.MouseBehavior.LockCenter then return true end
+        if M.ExplicitFree() or not native or not known or M.mouseOwned or Input.MouseBehavior==Enum.MouseBehavior.LockCenter then return true end
         local ok=pcall(function()
             Input.MouseBehavior=Enum.MouseBehavior.LockCenter
             assert(Input.MouseBehavior==Enum.MouseBehavior.LockCenter,"native capture readback")
@@ -2105,15 +2210,23 @@ do
         local absoluteX,absoluteY=0,0
         if ok and point and finite(point.X) and finite(point.Y) then
             if M.absPoint then absoluteX=point.X-M.absPoint.X;absoluteY=point.Y-M.absPoint.Y end
-            M.absPoint=point
+            M.absPoint=point;M.pointerPoint=point
         else M.absPoint=nil end
+        if owned and Input.MouseBehavior==Enum.MouseBehavior.LockCenter and (absoluteX~=0 or absoluteY~=0) then
+            M.stats.pointerChangesWhileLocked=(M.stats.pointerChangesWhileLocked or 0)+1
+        end
         local x,y=M.lookDX or 0,M.lookDY or 0;M.lookDX=0;M.lookDY=0
-        if not b or not b.active or not cfg.mobiladorDirectLook or not (owned or native) then return end
+        local free=M.ExplicitFree()
+        if not b or not b.active or not cfg.mobiladorDirectLook or not (owned or native or free) then return end
         for key,entry in pairs(b.functions) do
             if b.input[key]~=entry.wrapper then M.DetachBridge();M.bridgeStatus="entrada alterada pelo jogo; use "..cfg.mobiladorRecoverKey;return end
         end
         local enabledOK,enabled=pcall(b.input.getInputEnabled)
         if not enabledOK or not enabled then return end
+        if free then
+            M.frameRotation=Vector2.new(0,0);M.frameOwned=true;M.frameActive=true;M.frameBridge=b;M.inputSource="livre"
+            return
+        end
         if not M.motionAt or os.clock()-M.motionAt>0.12 then x,y=0,0 end
         local source="evento"
         if x==0 and y==0 then
@@ -2190,17 +2303,18 @@ do
     function M.ReleaseMouse()
         if not M.mouseOwned then return end
         local native,known=M.NativeLock()
-        if known then
-            local r=M.records.MouseBehavior;M.records.MouseBehavior=nil
-            if r and Input.MouseBehavior==r.last then
-                pcall(function() Input.MouseBehavior=native and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default end)
-            end
-        else M.Release("MouseBehavior") end
+        local r=M.records.MouseBehavior;M.records.MouseBehavior=nil
+        if r and Input.MouseBehavior==r.last then
+            pcall(function()
+                Input.MouseBehavior=not M.ExplicitFree() and known and native and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
+            end)
+        end
         M.mouseOwned=false
     end
     function M.Recover()
         if not M.running then notify("Ative Mobilador para recuperar o mouse.");return end
-        M.ClearPresses(false);M.ResetMotion();M.failures=0;M.cursorFailures=0;M.retryAt=nil;M.lastError=nil
+        M.ClearPresses(true);M.freeRequested=true;M.freeNativeValue,M.freeNativeKnown=M.NativeLock()
+        M.SyncModals(false);M.ResetMotion();M.failures=0;M.cursorFailures=0;M.retryAt=nil;M.lastError=nil
         M.recoverUntil=os.clock()+0.08;M.target=Enum.MouseBehavior.Default
         M.Write("MouseBehavior",M.target);M.mouseOwned=true
         M.Release("MouseDeltaSensitivity");M.FindNativeCamera();M.UpdateCursor()
@@ -2220,6 +2334,7 @@ do
         local blocked,message=M.Blocked()
         if blocked then
             if M.blockedMode~=blocked then M.ClearPresses(false);M.ResetMotion() end
+            M.SyncModals(false)
             M.blockedMode=blocked;M.target=Enum.MouseBehavior.Default
             M.Write("MouseBehavior",M.target);M.mouseOwned=true
             M.Release("MouseDeltaSensitivity");M.SetMarker(false);M.Status(blocked,message);return
@@ -2233,11 +2348,7 @@ do
         if not (Input.MouseEnabled or Input.KeyboardEnabled or M.seenMouse) then
             M.target=nil;M.ReleaseAll();M.Status("SEM MOUSE","aguardando mouse ou teclado");return
         end
-        if M.keyDown then
-            local ok,down=pcall(Input.IsKeyDown,Input,Enum.KeyCode[cfg.mobiladorShiftKey])
-            if ok and down then M.keySeenDown=true
-            elseif ok and M.keySeenDown then M.keyDown=false;M.keySeenDown=false end
-        end
+        M.PollKey(now)
         if M.rightHeld and not M.leftDown and (not M.rightPollAfter or now>=M.rightPollAfter) then
             local ok,down=pcall(Input.IsMouseButtonPressed,Input,Enum.UserInputType.MouseButton2)
             if ok and down then M.rightSeenDown=true;M.rightUpSince=nil
@@ -2258,44 +2369,63 @@ do
         if not recovering then M.recoverUntil=nil end
         local owned=not recovering and M.WantsCapture()
         local wrote=true
-        if owned or recovering then
+        M.SyncModals(owned==true)
+        if owned or recovering or M.ExplicitFree() then
             M.target=owned and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
-            wrote=M.Write("MouseBehavior",M.target);M.mouseOwned=true
+            wrote=M.WriteCapture(M.target)
         else
             M.ReleaseMouse();M.target=nil
         end
-        M.nativeLocked,M.nativeKnown=M.NativeLock()
+        M.nativeLocked,M.nativeKnown=M.ReadNativeChoice()
         if cam.CameraType~=Enum.CameraType.Scriptable and not (cfg.lockOn and API.LockOn and API.LockOn.target) then
             wrote=M.EnsureNativeCapture(M.nativeLocked,M.nativeKnown) and wrote
         end
-        local captured=wrote and (owned or M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter)
+        local captured=wrote and not recovering and not M.ExplicitFree() and (owned or M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter)
         M.SetMarker(captured)
         if owned and cfg.mobiladorFixedSensitivity then M.Write("MouseDeltaSensitivity",cfg.mobiladorSensitivity)
         else M.Release("MouseDeltaSensitivity") end
         local mode=recovering and "RECUPERANDO" or owned and "TECLA" or captured and "CAMERA NATIVA" or "LIVRE"
         if not wrote then mode="API INDISPONIVEL" end
         local status=owned and (cfg.mobiladorShiftKey..": captura; "..(M.bridgeStatus or "entrada pendente"))
-            or recovering and "recuperando mouse" or captured and "Shift / primeira pessoa com o jogo" or "mouse livre; Shift com o jogo"
+            or recovering and "recuperando mouse" or M.ExplicitFree() and ("cursor liberado pela tecla; "..cfg.mobiladorShiftKey.." prende novamente")
+            or captured and "Shift / primeira pessoa com o jogo" or "mouse livre; Shift com o jogo"
         M.Status(mode,status)
     end
     function M.BeforeCamera(dt)
         if not M.running or not state.alive then return end
         local cam=workspace.CurrentCamera
-        if M.Blocked() or not M.CameraAllowed(cam,M.hum,M.root) then M.ResetMotion();M.SetMarker(false);return end
+        if M.Blocked() or not M.CameraAllowed(cam,M.hum,M.root) then M.SyncModals(false);M.ResetMotion();M.SetMarker(false);return end
         if M.failures and (M.failures>=3 or M.retryAt and os.clock()<M.retryAt) then M.ResetMotion();return end
         local recovering=M.recoverUntil and os.clock()<M.recoverUntil
         if recovering then M.ResetMotion();return end
         local owned=M.WantsCapture()
-        if owned then
-            local wrote=M.Write("MouseBehavior",Enum.MouseBehavior.LockCenter);M.mouseOwned=true
+        M.SyncModals(owned==true)
+        if owned or M.ExplicitFree() then
+            local wrote=M.WriteCapture(owned and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default)
             if not wrote then M.ResetMotion();return end
         elseif M.mouseOwned then M.ReleaseMouse() end
         if cam.CameraType==Enum.CameraType.Scriptable or cfg.lockOn and API.LockOn and API.LockOn.target then M.ResetMotion();return end
-        local native,known=M.NativeLock()
+        local native,known=M.ReadNativeChoice()
         if not M.EnsureNativeCapture(native,known) then M.ResetMotion();return end
-        native=native or Input.MouseBehavior==Enum.MouseBehavior.LockCenter and not M.mouseOwned
+        native=not M.ExplicitFree() and (native or Input.MouseBehavior==Enum.MouseBehavior.LockCenter and not M.mouseOwned)
         if M.inputCaptured~=(owned or native) then M.ResetMotion();M.inputCaptured=owned or native end
         M.PrepareInput(cam,dt,owned,native)
+    end
+    function M.FinalizeCapture()
+        if not M.running or not state.alive or not cfg.mobilador then return end
+        if M.failures and (M.failures>=3 or M.retryAt and os.clock()<M.retryAt) then M.SyncModals(false);return end
+        local cam=workspace.CurrentCamera
+        if not M.CameraAllowed(cam,M.hum,M.root) then M.SyncModals(false);return end
+        local blocked=M.Blocked()
+        local recovering=M.recoverUntil and os.clock()<M.recoverUntil
+        local owned=not blocked and not recovering and M.WantsCapture()
+        M.SyncModals(owned==true)
+        if blocked or recovering or owned or M.ExplicitFree() then
+            local target=owned and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
+            if Input.MouseBehavior~=target then M.stats.finalCorrections=(M.stats.finalCorrections or 0)+1 end
+            M.target=target;M.WriteCapture(target)
+        end
+        M.UpdateCursor()
     end
     local function pointerHitsUI(input)
         local point=input.Position
@@ -2322,6 +2452,7 @@ do
             return
         end
         if input.UserInputType==Enum.UserInputType.Keyboard and (input.KeyCode==Enum.KeyCode.LeftShift or input.KeyCode==Enum.KeyCode.RightShift) then
+            if not M.shift then M.freeRequested=false;M.ResetMotion() end
             M.stats.shiftEvents=(M.stats.shiftEvents or 0)+1;return
         end
         -- Native camera/aim bindings can mark real mouse input as processed, too.
@@ -2334,8 +2465,13 @@ do
             if cfg.mobiladorRightMode=="Alternar" then M.rightToggle=not M.rightToggle else M.rightHeld=true end
         elseif input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode==Enum.KeyCode[cfg.mobiladorRecoverKey] then M.Recover()
         elseif input.UserInputType==Enum.UserInputType.Keyboard and cfg.mobiladorShift
-            and input.KeyCode==Enum.KeyCode[cfg.mobiladorShiftKey] and not M.keyDown then
-            M.keyDown=true;M.keySeenDown=false;M.shift=not M.shift
+            and input.KeyCode==Enum.KeyCode[cfg.mobiladorShiftKey] then
+            local now=os.clock();M.PollKey(now)
+            if M.keyDown then return end
+            M.keyDown=true;M.keySeenDown=false;M.keyPressedAt=now;M.lastKeyToggleAt=now
+            M.shift=not M.shift;M.freeRequested=not M.shift;M.capturePulse=M.shift or nil
+            if not M.shift then M.freeNativeValue,M.freeNativeKnown=M.NativeLock() end
+            if not M.shift then M.SyncModals(false) end
             M.ResetMotion()
         end
     end
@@ -2345,7 +2481,7 @@ do
             return
         end
         if input.UserInputType==Enum.UserInputType.MouseButton2 then M.rightHeld=false;M.rightDown=false;M.rightSeenDown=false;M.rightUpSince=nil end
-        if input.KeyCode==Enum.KeyCode[cfg.mobiladorShiftKey] then M.keyDown=false;M.keySeenDown=false end
+        if input.KeyCode==Enum.KeyCode[cfg.mobiladorShiftKey] then M.keyDown=false;M.keySeenDown=false;M.keyPressedAt=nil end
     end
     function M.OnChanged(input)
         if input.UserInputType~=Enum.UserInputType.MouseMovement then return end
@@ -2355,17 +2491,17 @@ do
         local stats=M.stats;stats.moves=stats.moves+1;stats.dx=x;stats.dy=y
         if x~=0 or y~=0 then stats.nonzero=stats.nonzero+1;M.phaseMoves=(M.phaseMoves or 0)+1 end
         stats.maxDelta=math.max(stats.maxDelta,math.abs(x),math.abs(y))
-        if cfg.mobiladorDirectLook and (M.WantsCapture() or M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter) then
+        if cfg.mobiladorDirectLook and not M.ExplicitFree() and (M.WantsCapture() or M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter) then
             M.lookDX=math.clamp((M.lookDX or 0)+x,-20000,20000);M.lookDY=math.clamp((M.lookDY or 0)+y,-20000,20000);M.motionAt=os.clock()
         end
     end
     function M.Stop()
-        M.CancelBind();M.DetachBridge();M.ResetMotion()
+        M.CancelBind();M.SyncModals(false);M.DetachBridge();M.ResetMotion()
         M.running=false;M.target=nil;M.camera=nil;M.first=false;M.recoverUntil=nil;M.blockedMode=nil;M.inputCaptured=nil
-        M.ClearPresses(true);M.ReleaseAll()
+        M.ReleaseAll();M.ClearPresses(true);M.lastKeyToggleAt=nil
         M.nativeGeneration=(M.nativeGeneration or 0)+1;M.scanning=false;M.nativeModule=nil;M.nativeLocked=false;M.nativeKnown=false
         for _,connection in ipairs(M.connections) do connection:Disconnect() end;M.connections={}
-        Run:UnbindFromRenderStep(binding);M.Status("DESLIGADO","desligado")
+        Run:UnbindFromRenderStep(binding);Run:UnbindFromRenderStep(finalBinding);M.Status("DESLIGADO","desligado")
     end
     function M.Destroy()
         M.cursorDestroyed=true;M.Stop();M.CursorIcon(nil);if M.imageConnection then M.imageConnection:Disconnect();M.imageConnection=nil end;markerGui:Destroy()
@@ -2383,8 +2519,8 @@ do
             end end
         end
         M.resolvingKeys=false
-        if M.shiftKey~=cfg.mobiladorShiftKey or not cfg.mobiladorShift then M.shift=false;M.keyDown=false end
-        if M.rightMode~=cfg.mobiladorRightMode or M.manual~=cfg.mobiladorManual then M.ClearPresses(false) end
+        if M.shiftKey~=cfg.mobiladorShiftKey or not cfg.mobiladorShift then M.shift=false;M.keyDown=false;M.freeRequested=false;M.lastKeyToggleAt=nil end
+        if M.rightMode~=cfg.mobiladorRightMode or M.manual~=cfg.mobiladorManual then M.ClearPresses(false);M.freeRequested=false end
         M.shiftKey=cfg.mobiladorShiftKey;M.rightMode=cfg.mobiladorRightMode;M.manual=cfg.mobiladorManual;M.markerDirty=true
         M.failures=0;M.cursorFailures=0;M.retryAt=nil;M.lastError=nil
         M.lookInvert=1
@@ -2410,6 +2546,9 @@ do
             M.connections[#M.connections+1]=GuiService.MenuClosed:Connect(function() M.menuOpen=false;M.ClearPresses(false);M.target=nil end)
         end
         Run:BindToRenderStep(binding,Enum.RenderPriority.Camera.Value-1,M.BeforeCamera)
+        Run:BindToRenderStep(finalBinding,Enum.RenderPriority.Last.Value+1,function()
+            if not pcall(M.FinalizeCapture) then set("mobilador",false,true);notify("Falha ao reconciliar captura; mouse liberado.") end
+        end)
         M.Status("PRONTO","feche o painel; "..cfg.mobiladorShiftKey.." prende / solta")
     end
     function M.Snapshot()
@@ -2433,7 +2572,10 @@ do
             markerEnabled=markerGui.Enabled,markerSize=cfg.mobiladorReticleSize,markerStyle=cfg.mobiladorReticleStyle,
             customImageLoaded=image.IsLoaded==true,cursorScope=cfg.mobiladorCursorScope,cursorFailures=M.cursorFailures,cursorSuspended=M.cursorFault==true,
             nativeShift=M.nativeLocked,nativeShiftKnown=M.nativeKnown,bridgeStatus=M.bridgeStatus,bridgeCalls=M.bridge and M.bridge.calls or 0,
-            bridgeSource=M.bridge and M.bridge.source or "none",inputSource=M.inputSource or "none",menuKey=cfg.toggleKey,shiftKeysReserved=true,lookPending={M.lookDX or 0,M.lookDY or 0}}
+            bridgeSource=M.bridge and M.bridge.source or "none",inputSource=M.inputSource or "none",menuKey=cfg.toggleKey,shiftKeysReserved=true,
+            freeRequested=M.ExplicitFree(),keyDown=M.keyDown,modalOverrides=M.modalCount or 0,finalCapturePass=true,
+            pointerLocation=M.pointerPoint and {M.pointerPoint.X,M.pointerPoint.Y} or nil,
+            lookPending={M.lookDX or 0,M.lookDY or 0}}
     end
     for _,key in ipairs({"mobilador","mobiladorShift","mobiladorShiftKey","mobiladorRightMode","mobiladorRecoverKey",
         "mobiladorCustomCamera","mobiladorFixedSensitivity","mobiladorSensitivity","mobiladorManual","mobiladorDirectLook","mobiladorLookSpeed"}) do actions[key]=M.Configure end
@@ -5191,6 +5333,7 @@ task.defer(function()
     end)
 end)
 return API
+
 
 
 
