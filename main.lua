@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.15
+-- Huss Valley Panel 0.6.16
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -24,6 +24,7 @@ local defaults = {
     resizeShiftLock=false, shiftLockScale=1.5, selectedButtonScale=1,
     mobilador=false, mobiladorShift=true, mobiladorShiftKey="LeftShift", mobiladorRightMode="Segurar", mobiladorRecoverKey="F8",
     mobiladorCustomCamera=false, mobiladorFixedSensitivity=false, mobiladorSensitivity=1,
+    mobiladorReticle=true, mobiladorReticleSize=22,
     firstPerson=false, unlockMouse=false, fov=70, customFov=false, fullbright=false, xray=false,
     lockOn=false, radius=30, prediction=0.12, aimSmooth=12, faceTarget=false, teamCheck=false,
     lockMode="Console", lockButton=false, lockKey="L", lockReleaseRange=80, lockWallCheck=true,
@@ -51,7 +52,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.15", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.16", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -343,7 +344,7 @@ local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,36
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
     shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85},
-    autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5},jumpButtonScale={0.5,3},shiftLockScale={0.5,3},selectedButtonScale={0.5,3},mobiladorSensitivity={0.1,3}}
+    autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5},jumpButtonScale={0.5,3},shiftLockScale={0.5,3},selectedButtonScale={0.5,3},mobiladorSensitivity={0.1,3},mobiladorReticleSize={12,40}}
 local function valid(key,value,keyContext)
     keyContext=keyContext or cfg
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
@@ -354,7 +355,7 @@ local function valid(key,value,keyContext)
     elseif key=="accent" and not palette[value] then return false
     elseif key=="dashSide" and value~="Right" and value~="Left" then return false
     elseif key=="lockMode" and value~="Console" and value~="Classico" then return false
-    elseif key=="mobiladorRightMode" and value~="Segurar" and value~="Alternar" then return false
+    elseif key=="mobiladorRightMode" and value~="Segurar" and value~="Alternar" and value~="Desligado" then return false
     elseif key=="mobiladorShiftKey" or key=="mobiladorRecoverKey" then
         local ok,k=pcall(function() return Enum.KeyCode[value] end)
         if not ok or not k or k==Enum.KeyCode.Unknown or value=="Escape" or value:match("^Button") or value:match("^DPad") or value:match("^Thumbstick") then return false end
@@ -965,7 +966,9 @@ do
     local content=card(right,"Mobilador / mouse","mobilador","Compatibilidade para mouse e teclado pelo hub. Shift alterna a captura; botao direito pode segurar ou alternar. Abra o painel para liberar o cursor. Desliga Unlock Mouse enquanto ativo.")
     checkbox(content,"Shift alterna captura","mobiladorShift")
     cycle(content,"Tecla de captura","mobiladorShiftKey",{"LeftShift","LeftControl","CapsLock","RightControl"})
-    cycle(content,"Botao direito","mobiladorRightMode",{"Segurar","Alternar"})
+    cycle(content,"Botao direito","mobiladorRightMode",{"Segurar","Alternar","Desligado"})
+    checkbox(content,"Mostrar mira na captura","mobiladorReticle")
+    slider(content,"Tamanho da mira","mobiladorReticleSize",12,40,1," px")
     cycle(content,"Tecla de recuperacao","mobiladorRecoverKey",{"F8","F6","F7","Insert"})
     actionButton(content,"Recuperar mouse agora",function() if API.Mobilador then API.Mobilador.Recover() end end)
     checkbox(content,"Aplicar em camera personalizada","mobiladorCustomCamera")
@@ -1765,6 +1768,32 @@ end
 do
     local M={running=false,connections={},records={},focused=true,events={},stats={moves=0,nonzero=0,maxDelta=0},shift=false}
     API.Mobilador=M
+    -- Separate viewport-sized canvas: only inert Frames are drawn; it never receives a click.
+    local markerGui=create("ScreenGui",{Name="HussMobiladorMarker",ResetOnSpawn=false,IgnoreGuiInset=true,
+        ZIndexBehavior=Enum.ZIndexBehavior.Sibling,DisplayOrder=2147483001,Enabled=false},gui.Parent)
+    pcall(function() markerGui.ScreenInsets=Enum.ScreenInsets.None end)
+    M.markerGui=markerGui
+    local marker=create("Frame",{Name="CaptureMarker",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),
+        Size=UDim2.fromOffset(22,22),BackgroundTransparency=1,BorderSizePixel=0,Active=false,Selectable=false},markerGui)
+    M.marker=marker
+    local function arm(name,anchor,position,size)
+        local border=create("Frame",{Name=name,AnchorPoint=anchor,Position=position,Size=size,
+            BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=0.12,BorderSizePixel=0,Active=false,Selectable=false},marker)
+        create("Frame",{Name="Ink",Position=UDim2.fromOffset(1,1),Size=UDim2.new(1,-2,1,-2),
+            BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,Active=false,Selectable=false},border)
+    end
+    arm("Left",Vector2.new(0,0.5),UDim2.fromScale(0,0.5),UDim2.new(0.32,0,0,4))
+    arm("Right",Vector2.new(1,0.5),UDim2.fromScale(1,0.5),UDim2.new(0.32,0,0,4))
+    arm("Top",Vector2.new(0.5,0),UDim2.fromScale(0.5,0),UDim2.new(0,4,0.32,0))
+    arm("Bottom",Vector2.new(0.5,1),UDim2.fromScale(0.5,1),UDim2.new(0,4,0.32,0))
+    arm("Center",Vector2.new(0.5,0.5),UDim2.fromScale(0.5,0.5),UDim2.fromOffset(4,4))
+    function M.SetMarker(captured)
+        local wanted=not not (captured and M.running and cfg.mobilador and cfg.mobiladorReticle)
+        if wanted and M.markerSize~=cfg.mobiladorReticleSize then
+            M.markerSize=cfg.mobiladorReticleSize;marker.Size=UDim2.fromOffset(M.markerSize,M.markerSize)
+        end
+        if markerGui.Enabled~=wanted then markerGui.Enabled=wanted end
+    end
     local binding="HussValleyMobilador_"..player.UserId
     local serviceOK,GuiService=pcall(function() return game:GetService("GuiService") end)
     if not serviceOK then GuiService=nil end
@@ -1775,6 +1804,7 @@ do
         if r then pcall(function() if Input[property]==r.last and Input[property]~=r.base then Input[property]=r.base end end) end
     end
     function M.ReleaseAll()
+        M.SetMarker(false)
         M.Release("MouseBehavior");M.Release("MouseIconEnabled");M.Release("MouseDeltaSensitivity")
     end
     local function applyProperty(property,value)
@@ -1808,7 +1838,7 @@ do
     end
     function M.ClearPresses(clearShift)
         M.rightHeld=false;M.rightToggle=false;M.rightDown=false;M.keyDown=false
-        M.rightSeenDown=false;M.keySeenDown=false
+        M.rightSeenDown=false;M.keySeenDown=false;M.leftDown=false;M.rightPollAfter=nil;M.rightUpSince=nil
         if clearShift then M.shift=false end
     end
     function M.Blocked()
@@ -1839,7 +1869,7 @@ do
     function M.Recover()
         if not M.running then notify("Ative Mobilador para recuperar o mouse.");return end
         M.ClearPresses(false);M.failures=0;M.retryAt=nil;M.lastError=nil
-        M.recoverUntil=os.clock()+0.08;M.target=Enum.MouseBehavior.Default
+        M.recoverUntil=os.clock()+0.08;M.target=Enum.MouseBehavior.Default;M.SetMarker(false)
         M.Write("MouseBehavior",Enum.MouseBehavior.Default);M.Write("MouseIconEnabled",true)
         M.Release("MouseDeltaSensitivity")
         M.Status("RECUPERANDO","recuperando captura do mouse")
@@ -1852,7 +1882,7 @@ do
         end
         local blocked,message=M.Blocked()
         if blocked then
-            M.ClearPresses(false);M.target=Enum.MouseBehavior.Default
+            M.ClearPresses(false);M.target=Enum.MouseBehavior.Default;M.SetMarker(false)
             M.Write("MouseBehavior",Enum.MouseBehavior.Default);M.Write("MouseIconEnabled",true);M.Release("MouseDeltaSensitivity")
             M.Status(blocked,message);return
         end
@@ -1869,10 +1899,16 @@ do
             if ok and down then M.keySeenDown=true
             elseif ok and M.keySeenDown then M.keyDown=false;M.keySeenDown=false end
         end
-        if M.rightHeld then
+        if M.rightHeld and not M.leftDown and (not M.rightPollAfter or now>=M.rightPollAfter) then
             local ok,down=pcall(Input.IsMouseButtonPressed,Input,Enum.UserInputType.MouseButton2)
-            if ok and down then M.rightSeenDown=true
-            elseif ok and M.rightSeenDown then M.rightHeld=false;M.rightDown=false;M.rightSeenDown=false end
+            if ok and down then M.rightSeenDown=true;M.rightUpSince=nil
+            elseif ok and M.rightSeenDown then
+                M.rightUpSince=M.rightUpSince or now
+                if now-M.rightUpSince>=0.06 then
+                    M.rightHeld=false;M.rightDown=false;M.rightSeenDown=false;M.rightUpSince=nil
+                    M.stats.pollReleases=(M.stats.pollReleases or 0)+1
+                end
+            else M.rightUpSince=nil end
         end
         -- Hysteresis avoids toggling capture on every small camera/zoom adjustment.
         local distance=(cam.CFrame.Position-cam.Focus.Position).Magnitude
@@ -1886,6 +1922,7 @@ do
         M.target=locked and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
         local wrote=M.Write("MouseBehavior",M.target)
         if wrote then M.Write("MouseIconEnabled",not locked) end
+        M.SetMarker(wrote and locked)
         if locked and cfg.mobiladorFixedSensitivity then M.Write("MouseDeltaSensitivity",cfg.mobiladorSensitivity)
         else M.Release("MouseDeltaSensitivity") end
         local mode=recovering and "RECUPERANDO" or M.first and "PRIMEIRA PESSOA" or M.shift and "SHIFT"
@@ -1899,7 +1936,8 @@ do
         end
     end
     function M.BeforeCamera()
-        if not M.running or not state.alive or M.Blocked() then return end
+        if not M.running or not state.alive then return end
+        if M.Blocked() then M.SetMarker(false);return end
         if M.target~=Enum.MouseBehavior.LockCenter or (M.recoverUntil and os.clock()<M.recoverUntil) then return end
         if not (M.first or M.shift or M.rightHeld or M.rightToggle) then return end
         if M.retryAt and os.clock()<M.retryAt or (M.failures or 0)>=3 then return end
@@ -1923,12 +1961,19 @@ do
     end
     function M.OnBegan(input,processed)
         if not M.running or not state.alive or M.Blocked() then return end
+        -- Left click belongs entirely to the game; it must never start or clear capture.
+        if input.UserInputType==Enum.UserInputType.MouseButton1 then
+            M.leftDown=true;M.rightSeenDown=false;M.rightPollAfter=nil;M.rightUpSince=nil
+            M.stats.leftPresses=(M.stats.leftPresses or 0)+1
+            return
+        end
         -- Native camera/aim bindings can mark real mouse input as processed, too.
         if processed and input.UserInputType==Enum.UserInputType.MouseButton2 and pointerHitsUI(input) then return end
         if input.UserInputType==Enum.UserInputType.MouseButton2 then
+            if cfg.mobiladorRightMode=="Desligado" then return end
             M.seenMouse=true
             if M.rightDown then return end
-            M.rightDown=true;M.rightSeenDown=false
+            M.rightDown=true;M.rightSeenDown=false;M.rightUpSince=nil
             if cfg.mobiladorRightMode=="Alternar" then M.rightToggle=not M.rightToggle else M.rightHeld=true end
         elseif input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode==Enum.KeyCode[cfg.mobiladorRecoverKey] then M.Recover()
         elseif input.UserInputType==Enum.UserInputType.Keyboard and cfg.mobiladorShift
@@ -1937,7 +1982,11 @@ do
         end
     end
     function M.OnEnded(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton2 then M.rightHeld=false;M.rightDown=false;M.rightSeenDown=false end
+        if input.UserInputType==Enum.UserInputType.MouseButton1 then
+            M.leftDown=false;M.rightSeenDown=false;M.rightPollAfter=os.clock()+0.12;M.rightUpSince=nil
+            return
+        end
+        if input.UserInputType==Enum.UserInputType.MouseButton2 then M.rightHeld=false;M.rightDown=false;M.rightSeenDown=false;M.rightUpSince=nil end
         if input.KeyCode==Enum.KeyCode[cfg.mobiladorShiftKey] then M.keyDown=false;M.keySeenDown=false end
     end
     function M.OnChanged(input)
@@ -1954,6 +2003,9 @@ do
         M.ClearPresses(true)
         for _,connection in ipairs(M.connections) do connection:Disconnect() end;M.connections={}
         Run:UnbindFromRenderStep(binding);M.ReleaseAll();M.Status("DESLIGADO","desligado")
+    end
+    function M.Destroy()
+        M.Stop();markerGui:Destroy()
     end
     function M.Configure()
         if M.resolvingKeys then return end
@@ -1972,7 +2024,7 @@ do
         if M.rightMode~=cfg.mobiladorRightMode then M.ClearPresses(false) end
         M.shiftKey=cfg.mobiladorShiftKey;M.rightMode=cfg.mobiladorRightMode
         M.failures=0;M.retryAt=nil;M.lastError=nil
-        if M.running then return end
+        if M.running then M.SetMarker(M.target==Enum.MouseBehavior.LockCenter and not M.Blocked());return end
         M.running=true;M.focused=true;M.camera=workspace.CurrentCamera;M.first=false
         local menuOK,opened=pcall(function() return GuiService and GuiService.MenuIsOpen end)
         M.menuOpen=menuOK and opened==true or false
@@ -2004,10 +2056,11 @@ do
             requested=M.target and enumName(M.target) or "none",cameraType=cam and enumName(cam.CameraType) or "none",
             firstPerson=M.first,shift=M.shift,rightHeld=M.rightHeld,rightToggle=M.rightToggle,rightMode=cfg.mobiladorRightMode,
             sensitivity=Input.MouseDeltaSensitivity,delta=gotDelta and delta or nil,
-            stats=stats,transitions=events,lastError=M.lastError,rightButtonReadback=gotButton and rightDown or false}
+            stats=stats,transitions=events,lastError=M.lastError,rightButtonReadback=gotButton and rightDown or false,
+            leftDown=M.leftDown,markerEnabled=markerGui.Enabled,markerSize=cfg.mobiladorReticleSize}
     end
     for _,key in ipairs({"mobilador","mobiladorShift","mobiladorShiftKey","mobiladorRightMode","mobiladorRecoverKey",
-        "mobiladorCustomCamera","mobiladorFixedSensitivity","mobiladorSensitivity"}) do actions[key]=M.Configure end
+        "mobiladorCustomCamera","mobiladorFixedSensitivity","mobiladorSensitivity","mobiladorReticle","mobiladorReticleSize"}) do actions[key]=M.Configure end
 end
 -- End mobilador capture compatibility.
 
@@ -4722,7 +4775,7 @@ function API.Destroy()
     if API.QuickActions then API.QuickActions.Stop() end
     if API.TouchControls then API.TouchControls.Destroy() end
     if API.LockOn then API.LockOn.Stop() end
-    if API.Mobilador then API.Mobilador.Stop() end
+    if API.Mobilador then API.Mobilador.Destroy() end
     if API.ConfigUI then API.ConfigUI.Stop() end
     for input in pairs(pointerSessions) do pointerSessions[input]=nil end
     if API.Shaders then API.Shaders.Stop() end
