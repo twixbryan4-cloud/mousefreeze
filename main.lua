@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.20
+-- Huss Valley Panel 0.6.21
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -54,7 +54,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.20", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.21", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -1010,7 +1010,7 @@ do
     API.MobiladorRecoverButton=actionButton(content,"Tecla de recuperacao",function() if API.Mobilador then API.Mobilador.BeginBind("mobiladorRecoverKey") end end)
     watch("mobiladorRecoverKey",function(v) API.MobiladorRecoverButton.Text="Recuperar: "..v.." (trocar)" end)
     actionButton(content,"Recuperar mouse agora",function() if API.Mobilador then API.Mobilador.Recover() end end)
-    text(content,"No modo somente tecla, Recuperar limpa a captura e deixa o cursor livre ate outra escolha.",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
+    text(content,"Recuperar limpa a captura do painel e devolve a camera ao jogo. V captura novamente.",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
     checkbox(content,"Aplicar em camera personalizada","mobiladorCustomCamera")
     checkbox(content,"Fixar multiplicador do mouse","mobiladorFixedSensitivity")
     slider(content,"Multiplicador do mouse","mobiladorSensitivity",0.1,3,0.05,"x")
@@ -2217,16 +2217,14 @@ do
         end
         local x,y=M.lookDX or 0,M.lookDY or 0;M.lookDX=0;M.lookDY=0
         local free=M.ExplicitFree()
-        if not b or not b.active or not cfg.mobiladorDirectLook or not (owned or native or free) then return end
+        -- Released input is transparent: never replace native rotation/activation with zero.
+        if free then M.inputSource="nativa";return end
+        if not b or not b.active or not cfg.mobiladorDirectLook or not (owned or native) then return end
         for key,entry in pairs(b.functions) do
             if b.input[key]~=entry.wrapper then M.DetachBridge();M.bridgeStatus="entrada alterada pelo jogo; use "..cfg.mobiladorRecoverKey;return end
         end
         local enabledOK,enabled=pcall(b.input.getInputEnabled)
         if not enabledOK or not enabled then return end
-        if free then
-            M.frameRotation=Vector2.new(0,0);M.frameOwned=true;M.frameActive=true;M.frameBridge=b;M.inputSource="livre"
-            return
-        end
         if not M.motionAt or os.clock()-M.motionAt>0.12 then x,y=0,0 end
         local source="evento"
         if x==0 and y==0 then
@@ -2311,6 +2309,11 @@ do
         end
         M.mouseOwned=false
     end
+    function M.ReturnToGame()
+        M.SyncModals(false);M.ResetMotion();M.inputCaptured=nil;M.capturePulse=nil
+        M.Release("MouseDeltaSensitivity");M.ReleaseMouse();M.target=nil;M.inputSource="nativa"
+        M.stats.nativeHandoffs=(M.stats.nativeHandoffs or 0)+1
+    end
     function M.Recover()
         if not M.running then notify("Ative Mobilador para recuperar o mouse.");return end
         M.ClearPresses(true);M.freeRequested=true;M.freeNativeValue,M.freeNativeKnown=M.NativeLock()
@@ -2370,24 +2373,27 @@ do
         local owned=not recovering and M.WantsCapture()
         local wrote=true
         M.SyncModals(owned==true)
-        if owned or recovering or M.ExplicitFree() then
+        if owned or recovering then
             M.target=owned and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
             wrote=M.WriteCapture(M.target)
         else
-            M.ReleaseMouse();M.target=nil
+            if M.mouseOwned then
+                if M.ExplicitFree() then M.ReturnToGame() else M.ReleaseMouse() end
+            end
+            M.target=nil
         end
         M.nativeLocked,M.nativeKnown=M.ReadNativeChoice()
         if cam.CameraType~=Enum.CameraType.Scriptable and not (cfg.lockOn and API.LockOn and API.LockOn.target) then
             wrote=M.EnsureNativeCapture(M.nativeLocked,M.nativeKnown) and wrote
         end
-        local captured=wrote and not recovering and not M.ExplicitFree() and (owned or M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter)
+        local captured=wrote and not recovering and (owned or not M.ExplicitFree() and M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter)
         M.SetMarker(captured)
         if owned and cfg.mobiladorFixedSensitivity then M.Write("MouseDeltaSensitivity",cfg.mobiladorSensitivity)
         else M.Release("MouseDeltaSensitivity") end
         local mode=recovering and "RECUPERANDO" or owned and "TECLA" or captured and "CAMERA NATIVA" or "LIVRE"
         if not wrote then mode="API INDISPONIVEL" end
         local status=owned and (cfg.mobiladorShiftKey..": captura; "..(M.bridgeStatus or "entrada pendente"))
-            or recovering and "recuperando mouse" or M.ExplicitFree() and ("cursor liberado pela tecla; "..cfg.mobiladorShiftKey.." prende novamente")
+            or recovering and "recuperando mouse" or M.ExplicitFree() and ("camera com o jogo; "..cfg.mobiladorShiftKey.." captura novamente")
             or captured and "Shift / primeira pessoa com o jogo" or "mouse livre; Shift com o jogo"
         M.Status(mode,status)
     end
@@ -2400,10 +2406,12 @@ do
         if recovering then M.ResetMotion();return end
         local owned=M.WantsCapture()
         M.SyncModals(owned==true)
-        if owned or M.ExplicitFree() then
-            local wrote=M.WriteCapture(owned and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default)
+        if owned then
+            local wrote=M.WriteCapture(Enum.MouseBehavior.LockCenter)
             if not wrote then M.ResetMotion();return end
-        elseif M.mouseOwned then M.ReleaseMouse() end
+        elseif M.mouseOwned then
+            if M.ExplicitFree() then M.ReturnToGame() else M.ReleaseMouse() end
+        end
         if cam.CameraType==Enum.CameraType.Scriptable or cfg.lockOn and API.LockOn and API.LockOn.target then M.ResetMotion();return end
         local native,known=M.ReadNativeChoice()
         if not M.EnsureNativeCapture(native,known) then M.ResetMotion();return end
@@ -2420,7 +2428,7 @@ do
         local recovering=M.recoverUntil and os.clock()<M.recoverUntil
         local owned=not blocked and not recovering and M.WantsCapture()
         M.SyncModals(owned==true)
-        if blocked or recovering or owned or M.ExplicitFree() then
+        if blocked or recovering or owned then
             local target=owned and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
             if Input.MouseBehavior~=target then M.stats.finalCorrections=(M.stats.finalCorrections or 0)+1 end
             M.target=target;M.WriteCapture(target)
@@ -2471,7 +2479,7 @@ do
             M.keyDown=true;M.keySeenDown=false;M.keyPressedAt=now;M.lastKeyToggleAt=now
             M.shift=not M.shift;M.freeRequested=not M.shift;M.capturePulse=M.shift or nil
             if not M.shift then M.freeNativeValue,M.freeNativeKnown=M.NativeLock() end
-            if not M.shift then M.SyncModals(false) end
+            if not M.shift then M.ReturnToGame() end
             M.ResetMotion()
         end
     end
@@ -2574,6 +2582,7 @@ do
             nativeShift=M.nativeLocked,nativeShiftKnown=M.nativeKnown,bridgeStatus=M.bridgeStatus,bridgeCalls=M.bridge and M.bridge.calls or 0,
             bridgeSource=M.bridge and M.bridge.source or "none",inputSource=M.inputSource or "none",menuKey=cfg.toggleKey,shiftKeysReserved=true,
             freeRequested=M.ExplicitFree(),keyDown=M.keyDown,modalOverrides=M.modalCount or 0,finalCapturePass=true,
+            releasedToGame=M.ExplicitFree() and not M.mouseOwned,nativeInputPassthrough=M.ExplicitFree() and not M.frameActive,
             pointerLocation=M.pointerPoint and {M.pointerPoint.X,M.pointerPoint.Y} or nil,
             lookPending={M.lookDX or 0,M.lookDY or 0}}
     end

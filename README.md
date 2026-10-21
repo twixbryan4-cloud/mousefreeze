@@ -1,6 +1,20 @@
 # Huss Valley Panel
 
-Versão 0.6.20 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.21 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Devolver a câmera ao jogo ao soltar V na versão 0.6.21
+
+Use o mesmo loader e confira **v0.6.21**. V continua capturando o ponteiro e girando sem o esquerdo. Ao pressionar V novamente, o painel libera a própria captura uma vez e devolve a entrada normal ao jogo. Não é necessário alternar Shift nem abrir/fechar o menu para remover um bloqueio do painel. Os controles normais de câmera e o Shift nativo ficam com o jogo; se o Shift nativo já estiver ativo, ele pode manter sua própria captura, independentemente de V.
+
+O bloqueio relatado foi localizado na correção da v0.6.20: o estado de cursor livre substituía a rotação nativa por Vector2.zero, retornava ativação false e continuava impondo MouseBehavior.Default nas etapas de renderização. Isso impedia movimentos normais da câmera mesmo depois de o ponteiro aparecer solto. A reprodução contra o arquivo publicado confirmou que um gesto nativo de pan era zerado e sua política LockCurrentPosition era rejeitada continuamente.
+
+O estado após soltar V agora é transparente. Não arma a integração de giro e preserva os valores originais de getRotation e getRotationActivated, incluindo gestos nativos de mouse/toque. A liberação limpa só o movimento pendente do painel, restaura suas flags Modal e seu multiplicador, descarta o pedido de captura e encerra a propriedade de MouseBehavior. Default não é reimposto a cada quadro nesse estado; escritores nativos podem voltar a usar Default, LockCenter ou LockCurrentPosition conforme o controle do jogo. A reconciliação tardia continua funcionando durante a captura pedida, menus e recuperação curta. A captura por V conserva o tratamento modal e o movimento contínuo da versão anterior.
+
+**F8 / Recuperar mouse agora** limpa a captura do painel, faz a recuperação curta e também devolve o controle ao jogo. A interface e o diagnóstico deixam de descrever isso como um Default permanente: releasedToGame, nativeInputPassthrough e nativeHandoffs registram a passagem de controle. O diagnóstico continua local. Não há clique, tecla, movimento virtual, reativação dos controles do personagem ou atribuição de CFrame/Focus nessa liberação.
+
+O script completo compilou no Luau oficial. Passaram **32 casos de comportamento atuais**, mais **uma reprodução da v0.6.20**, com **254 asserções no total**, além da sintaxe. A cobertura inclui pan nativo após soltar V, ativação nativa preservada, toque/câmera própria, Shift já ativo, alternância repetida de V/Shift, recuperação, primeira pessoa, câmera substituída, entrada recebida durante a liberação, ausência de escritas permanentes de Default, restauração modal e recaptura atravessando larguras de tela na simulação. Os casos anteriores de captura/liberação por tecla, limite modal, tentativas, foco, menus, cliques, limpeza e ausência de giro parado continuam exercitados. As expectativas antigas de manter Default para sempre foram substituídas pela devolução ao controlador nativo.
+
+Também passaram **709 asserções** existentes de câmera/ações nativas/FPS e **412** de editor de botões/propriedades. Lock On, ESP, ações de jogo, gráficos, botões, quick buttons e dispatcher principal foram comparados sem alterações. O teste de entrada física no Roblox/Delta continua pendente; a passagem de controle não substitui o encaminhamento de movimento pelo cliente.
 
 ## Captura real do ponteiro e soltura por V na versão 0.6.20
 
@@ -544,6 +558,7 @@ As opções começam desligadas. O ESP possui frequência de dados e distância 
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
 
 Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
+
 
 
 
