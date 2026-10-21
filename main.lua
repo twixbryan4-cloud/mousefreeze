@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.16
+-- Huss Valley Panel 0.6.17
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -25,6 +25,8 @@ local defaults = {
     mobilador=false, mobiladorShift=true, mobiladorShiftKey="LeftShift", mobiladorRightMode="Segurar", mobiladorRecoverKey="F8",
     mobiladorCustomCamera=false, mobiladorFixedSensitivity=false, mobiladorSensitivity=1,
     mobiladorReticle=true, mobiladorReticleSize=22,
+    mobiladorManual=true, mobiladorReticleStyle="Cruz", mobiladorReticleColor="Branco",
+    mobiladorReticleThickness=2, mobiladorReticleGap=4, mobiladorReticleOpacity=100, mobiladorReticleImage="",
     firstPerson=false, unlockMouse=false, fov=70, customFov=false, fullbright=false, xray=false,
     lockOn=false, radius=30, prediction=0.12, aimSmooth=12, faceTarget=false, teamCheck=false,
     lockMode="Console", lockButton=false, lockKey="L", lockReleaseRange=80, lockWallCheck=true,
@@ -52,7 +54,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.16", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.17", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -344,7 +346,8 @@ local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,36
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
     shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85},
-    autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5},jumpButtonScale={0.5,3},shiftLockScale={0.5,3},selectedButtonScale={0.5,3},mobiladorSensitivity={0.1,3},mobiladorReticleSize={12,40}}
+    autoJumpInterval={0.1,1},freezeDuration={0.05,3},freezeCooldown={0.5,5},jumpButtonScale={0.5,3},shiftLockScale={0.5,3},selectedButtonScale={0.5,3},mobiladorSensitivity={0.1,3},mobiladorReticleSize={4,64},
+    mobiladorReticleThickness={1,6},mobiladorReticleGap={0,16},mobiladorReticleOpacity={10,100}}
 local function valid(key,value,keyContext)
     keyContext=keyContext or cfg
     if defaults[key]==nil or type(value)~=type(defaults[key]) then return false end
@@ -356,6 +359,16 @@ local function valid(key,value,keyContext)
     elseif key=="dashSide" and value~="Right" and value~="Left" then return false
     elseif key=="lockMode" and value~="Console" and value~="Classico" then return false
     elseif key=="mobiladorRightMode" and value~="Segurar" and value~="Alternar" and value~="Desligado" then return false
+    elseif key=="mobiladorReticleStyle" and value~="Cruz" and value~="Ponto" and value~="Circulo" and value~="Cruz e ponto" and value~="Imagem" then return false
+    elseif key=="mobiladorReticleColor" and value~="Branco" and value~="Verde" and value~="Ciano" and value~="Vermelho" and value~="Amarelo" and value~="Rosa" then return false
+    elseif key=="mobiladorReticleImage" then
+        if #value>80 then return false end
+        value=value:match("^%s*(.-)%s*$")
+        if value~="" then
+            local id=value:match("^rbxassetid://(%d+)$") or value:match("^(%d+)$")
+            if not id or #id>20 or not id:find("[1-9]") then return false end
+            value="rbxassetid://"..id
+        end
     elseif key=="mobiladorShiftKey" or key=="mobiladorRecoverKey" then
         local ok,k=pcall(function() return Enum.KeyCode[value] end)
         if not ok or not k or k==Enum.KeyCode.Unknown or value=="Escape" or value:match("^Button") or value:match("^DPad") or value:match("^Thumbstick") then return false end
@@ -963,13 +976,32 @@ c=card(right,"Camera",nil);checkbox(c,"First Person","firstPerson");checkbox(c,"
 checkbox(c,"Custom FOV","customFov");slider(c,"FOV","fov",40,120,1)
 
 do
-    local content=card(right,"Mobilador / mouse","mobilador","Compatibilidade para mouse e teclado pelo hub. Shift alterna a captura; botao direito pode segurar ou alternar. Abra o painel para liberar o cursor. Desliga Unlock Mouse enquanto ativo.")
-    checkbox(content,"Shift alterna captura","mobiladorShift")
-    cycle(content,"Tecla de captura","mobiladorShiftKey",{"LeftShift","LeftControl","CapsLock","RightControl"})
+    local content=card(right,"Mobilador / mouse","mobilador","Somente tecla: voce escolhe quando prender ou soltar; cliques ficam com o jogo. Abra o painel para liberar. Sobrepoe o pedido de captura do Roblox, sem alterar uma configuracao interna do Delta.")
+    checkbox(content,"Somente a tecla prende","mobiladorManual")
+    checkbox(content,"Ativar tecla de captura","mobiladorShift")
+    API.MobiladorKeyButton=actionButton(content,"Tecla de captura",function() if API.Mobilador then API.Mobilador.BeginBind("mobiladorShiftKey") end end)
+    watch("mobiladorShiftKey",function(v) API.MobiladorKeyButton.Text="Prender / soltar: "..v.." (trocar)" end)
     cycle(content,"Botao direito","mobiladorRightMode",{"Segurar","Alternar","Desligado"})
+    text(content,"Botao direito e captura automatica da primeira pessoa so atuam com Somente a tecla desligado.",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
     checkbox(content,"Mostrar mira na captura","mobiladorReticle")
-    slider(content,"Tamanho da mira","mobiladorReticleSize",12,40,1," px")
-    cycle(content,"Tecla de recuperacao","mobiladorRecoverKey",{"F8","F6","F7","Insert"})
+    cycle(content,"Tipo de mira","mobiladorReticleStyle",{"Cruz","Ponto","Circulo","Cruz e ponto","Imagem"})
+    cycle(content,"Cor da mira","mobiladorReticleColor",{"Branco","Verde","Ciano","Vermelho","Amarelo","Rosa"})
+    slider(content,"Tamanho da mira","mobiladorReticleSize",4,64,1," px")
+    slider(content,"Espessura","mobiladorReticleThickness",1,6,1," px")
+    slider(content,"Abertura da cruz","mobiladorReticleGap",0,16,1," px")
+    slider(content,"Opacidade da mira","mobiladorReticleOpacity",10,100,1,"%")
+    local imageBox=create("TextBox",{Name="CustomCursorImage",Size=UDim2.new(1,0,0,25),BackgroundTransparency=0.5,
+        BackgroundColor3=colors.bg,TextColor3=colors.text,PlaceholderText="ID de imagem Roblox (mira Imagem)",Text="",TextSize=10,
+        Font=Enum.Font.GothamMedium,ClearTextOnFocus=false},content)
+    round(imageBox,4)
+    watch("mobiladorReticleImage",function(v) if not imageBox:IsFocused() then imageBox.Text=v end end)
+    listen(imageBox.FocusLost,function()
+        if not set("mobiladorReticleImage",imageBox.Text,true) then notify("Use um ID numerico de imagem Roblox ou rbxassetid://ID.") end
+        imageBox.Text=cfg.mobiladorReticleImage
+    end)
+    text(content,"Imagem privada ou indisponivel usa um ponto de reserva ate carregar. Ajustes ficam no perfil salvo.",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
+    API.MobiladorRecoverButton=actionButton(content,"Tecla de recuperacao",function() if API.Mobilador then API.Mobilador.BeginBind("mobiladorRecoverKey") end end)
+    watch("mobiladorRecoverKey",function(v) API.MobiladorRecoverButton.Text="Recuperar: "..v.." (trocar)" end)
     actionButton(content,"Recuperar mouse agora",function() if API.Mobilador then API.Mobilador.Recover() end end)
     checkbox(content,"Aplicar em camera personalizada","mobiladorCustomCamera")
     checkbox(content,"Fixar multiplicador do mouse","mobiladorFixedSensitivity")
@@ -1218,6 +1250,7 @@ listen(Input.JumpRequest,function() if cfg.infiniteJump then local _,h=character
 listen(Input.InputBegan,function(i,processed)
     if processed or Input:GetFocusedTextBox() then return end
     if API.LockOn and API.LockOn.binding then return end
+    if API.Mobilador and API.Mobilador.bindKey then return end
     if i.KeyCode==Enum.KeyCode[cfg.toggleKey] then show(not state.visible) end
 end)
 listen(workspace:GetPropertyChangedSignal("CurrentCamera"),function() restore("camera");applyFov();fit() end)
@@ -1768,7 +1801,7 @@ end
 do
     local M={running=false,connections={},records={},focused=true,events={},stats={moves=0,nonzero=0,maxDelta=0},shift=false}
     API.Mobilador=M
-    -- Separate viewport-sized canvas: only inert Frames are drawn; it never receives a click.
+    -- A passive viewport-sized canvas; shapes and images never receive game clicks.
     local markerGui=create("ScreenGui",{Name="HussMobiladorMarker",ResetOnSpawn=false,IgnoreGuiInset=true,
         ZIndexBehavior=Enum.ZIndexBehavior.Sibling,DisplayOrder=2147483001,Enabled=false},gui.Parent)
     pcall(function() markerGui.ScreenInsets=Enum.ScreenInsets.None end)
@@ -1776,24 +1809,74 @@ do
     local marker=create("Frame",{Name="CaptureMarker",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),
         Size=UDim2.fromOffset(22,22),BackgroundTransparency=1,BorderSizePixel=0,Active=false,Selectable=false},markerGui)
     M.marker=marker
-    local function arm(name,anchor,position,size)
-        local border=create("Frame",{Name=name,AnchorPoint=anchor,Position=position,Size=size,
+    local parts={}
+    local function arm(name)
+        local border=create("Frame",{Name=name,AnchorPoint=Vector2.new(0.5,0.5),
             BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=0.12,BorderSizePixel=0,Active=false,Selectable=false},marker)
-        create("Frame",{Name="Ink",Position=UDim2.fromOffset(1,1),Size=UDim2.new(1,-2,1,-2),
+        local ink=create("Frame",{Name="Ink",Position=UDim2.fromOffset(1,1),Size=UDim2.new(1,-2,1,-2),
             BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,Active=false,Selectable=false},border)
+        parts[name]={border=border,ink=ink}
+        if name=="Center" then round(border,99);round(ink,99) end
     end
-    arm("Left",Vector2.new(0,0.5),UDim2.fromScale(0,0.5),UDim2.new(0.32,0,0,4))
-    arm("Right",Vector2.new(1,0.5),UDim2.fromScale(1,0.5),UDim2.new(0.32,0,0,4))
-    arm("Top",Vector2.new(0.5,0),UDim2.fromScale(0.5,0),UDim2.new(0,4,0.32,0))
-    arm("Bottom",Vector2.new(0.5,1),UDim2.fromScale(0.5,1),UDim2.new(0,4,0.32,0))
-    arm("Center",Vector2.new(0.5,0.5),UDim2.fromScale(0.5,0.5),UDim2.fromOffset(4,4))
+    for _,name in ipairs({"Left","Right","Top","Bottom","Center"}) do arm(name) end
+    local circles={}
+    for i=1,2 do
+        local frame=create("Frame",{Name=i==1 and "CircleBorder" or "CircleInk",AnchorPoint=Vector2.new(0.5,0.5),
+            Position=UDim2.fromScale(0.5,0.5),BackgroundTransparency=1,BorderSizePixel=0,Active=false,Selectable=false,ZIndex=i},marker)
+        round(frame,99)
+        circles[i]={frame=frame,stroke=create("UIStroke",{Color=Color3.new(0,0,0),Thickness=2},frame)}
+    end
+    local image=create("ImageLabel",{Name="CustomImage",Position=UDim2.fromScale(0,0),Size=UDim2.fromScale(1,1),
+        BackgroundTransparency=1,Image="",Visible=false,Active=false,Selectable=false,ScaleType=Enum.ScaleType.Fit},marker)
+    M.markerImage=image;M.markerParts=parts;M.markerCircles=circles;M.markerDirty=true
+    local markerColors={Branco=Color3.new(1,1,1),Verde=Color3.fromRGB(80,255,100),Ciano=Color3.fromRGB(70,230,255),
+        Vermelho=Color3.fromRGB(255,75,75),Amarelo=Color3.fromRGB(255,235,60),Rosa=Color3.fromRGB(255,100,215)}
+    local function put(object,key,value) if object[key]~=value then object[key]=value end end
+    function M.DrawMarker()
+        local size=cfg.mobiladorReticleSize
+        local thickness=math.min(cfg.mobiladorReticleThickness,math.max(1,(size-2)/2))
+        local style,color=cfg.mobiladorReticleStyle,markerColors[cfg.mobiladorReticleColor]
+        local alpha=1-cfg.mobiladorReticleOpacity/100
+        M.markerSize=size;put(marker,"Size",UDim2.fromOffset(size,size))
+        put(image,"Image",style=="Imagem" and cfg.mobiladorReticleImage or "");put(image,"ImageTransparency",alpha);put(image,"ImageColor3",color)
+        local loaded=style=="Imagem" and cfg.mobiladorReticleImage~="" and image.IsLoaded
+        put(image,"Visible",not not loaded)
+        local cross=style=="Cruz" or style=="Cruz e ponto"
+        local dot=style=="Ponto" or style=="Cruz e ponto" or style=="Imagem" and not loaded
+        local gap=math.min(cfg.mobiladorReticleGap,math.max(0,(size-2)/2))
+        local length=math.max(1,(size-2*gap)/2)
+        for name,part in pairs(parts) do
+            local center=name=="Center"
+            put(part.border,"Visible",center and dot or not center and cross)
+            put(part.border,"BackgroundTransparency",1-(1-alpha)*0.88)
+            put(part.ink,"BackgroundColor3",color);put(part.ink,"BackgroundTransparency",alpha)
+            local x,y,w,h=size/2,size/2,thickness,thickness
+            if center then w=style=="Ponto" and size or math.max(2,thickness);h=w
+            elseif name=="Left" then x=x-gap-length/2;w=length
+            elseif name=="Right" then x=x+gap+length/2;w=length
+            elseif name=="Top" then y=y-gap-length/2;h=length
+            else y=y+gap+length/2;h=length end
+            put(part.border,"Position",UDim2.fromOffset(x,y));put(part.border,"Size",UDim2.fromOffset(w+2,h+2))
+        end
+        for i,circle in ipairs(circles) do
+            put(circle.frame,"Visible",style=="Circulo")
+            local diameter=math.max(1,size-thickness-2)
+            put(circle.frame,"Size",UDim2.fromOffset(diameter,diameter))
+            put(circle.stroke,"Thickness",i==1 and thickness+2 or thickness)
+            put(circle.stroke,"Color",i==1 and Color3.new(0,0,0) or color)
+            put(circle.stroke,"Transparency",i==1 and 1-(1-alpha)*0.88 or alpha)
+        end
+        M.markerDirty=false
+    end
     function M.SetMarker(captured)
         local wanted=not not (captured and M.running and cfg.mobilador and cfg.mobiladorReticle)
-        if wanted and M.markerSize~=cfg.mobiladorReticleSize then
-            M.markerSize=cfg.mobiladorReticleSize;marker.Size=UDim2.fromOffset(M.markerSize,M.markerSize)
-        end
+        if wanted and M.markerDirty then M.DrawMarker() end
         if markerGui.Enabled~=wanted then markerGui.Enabled=wanted end
     end
+    M.imageConnection=image:GetPropertyChangedSignal("IsLoaded"):Connect(function()
+        M.markerDirty=true
+        M.SetMarker(M.target==Enum.MouseBehavior.LockCenter and not M.Blocked())
+    end)
     local binding="HussValleyMobilador_"..player.UserId
     local serviceOK,GuiService=pcall(function() return game:GetService("GuiService") end)
     if not serviceOK then GuiService=nil end
@@ -1840,6 +1923,35 @@ do
         M.rightHeld=false;M.rightToggle=false;M.rightDown=false;M.keyDown=false
         M.rightSeenDown=false;M.keySeenDown=false;M.leftDown=false;M.rightPollAfter=nil;M.rightUpSince=nil
         if clearShift then M.shift=false end
+    end
+    function M.CancelBind()
+        M.bindKey=nil
+        for _,connection in ipairs(M.bindConnections or {}) do connection:Disconnect() end;M.bindConnections={}
+        if M.bindTimeout and type(task.cancel)=="function" then pcall(task.cancel,M.bindTimeout) end
+        M.bindTimeout=nil
+        if API.MobiladorKeyButton then API.MobiladorKeyButton.Text="Prender / soltar: "..cfg.mobiladorShiftKey.." (trocar)" end
+        if API.MobiladorRecoverButton then API.MobiladorRecoverButton.Text="Recuperar: "..cfg.mobiladorRecoverKey.." (trocar)" end
+    end
+    function M.BeginBind(key)
+        if not state.alive or state.booting or not state.visible then return false end
+        if key~="mobiladorShiftKey" and key~="mobiladorRecoverKey" then return false end
+        M.CancelBind()
+        if API.LockOn and API.LockOn.CancelBind then API.LockOn.CancelBind() end
+        M.bindKey=key
+        local button=key=="mobiladorShiftKey" and API.MobiladorKeyButton or API.MobiladorRecoverButton
+        if button then button.Text="Aperte uma tecla | Esc cancela" end
+        M.bindConnections={Input.InputBegan:Connect(function(input,processed)
+            if input.UserInputType~=Enum.UserInputType.Keyboard or Input:GetFocusedTextBox() then return end
+            if input.KeyCode==Enum.KeyCode.Escape then M.CancelBind();return end
+            if processed then return end
+            if set(key,input.KeyCode.Name,true) then M.CancelBind()
+            else notify("Escolha outra tecla; menu, Lock On e recuperacao usam atalhos separados.") end
+        end),Input.WindowFocusReleased:Connect(M.CancelBind)}
+        M.bindConnections[#M.bindConnections+1]=window:GetPropertyChangedSignal("Visible"):Connect(function()
+            if not window.Visible then M.CancelBind() end
+        end)
+        M.bindTimeout=task.delay(20,function() M.bindTimeout=nil;M.CancelBind() end)
+        return true
     end
     function M.Blocked()
         if not M.focused then return "FOCO","aguardando foco do jogo" end
@@ -1918,14 +2030,14 @@ do
         else M.first=false end
         local recovering=M.recoverUntil and now<M.recoverUntil
         if not recovering then M.recoverUntil=nil end
-        local locked=not recovering and (M.first or M.shift or M.rightHeld or M.rightToggle)
+        local locked=not recovering and (M.shift or not cfg.mobiladorManual and (M.first or M.rightHeld or M.rightToggle))
         M.target=locked and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
         local wrote=M.Write("MouseBehavior",M.target)
         if wrote then M.Write("MouseIconEnabled",not locked) end
         M.SetMarker(wrote and locked)
         if locked and cfg.mobiladorFixedSensitivity then M.Write("MouseDeltaSensitivity",cfg.mobiladorSensitivity)
         else M.Release("MouseDeltaSensitivity") end
-        local mode=recovering and "RECUPERANDO" or M.first and "PRIMEIRA PESSOA" or M.shift and "SHIFT"
+        local mode=recovering and "RECUPERANDO" or M.shift and "TECLA" or not cfg.mobiladorManual and M.first and "PRIMEIRA PESSOA"
             or (M.rightHeld or M.rightToggle) and "BOTAO DIREITO" or "LIVRE"
         if not wrote then mode="API INDISPONIVEL" end
         if M.mode~=mode or not M.nextStatus or now>=M.nextStatus then
@@ -1938,10 +2050,11 @@ do
     function M.BeforeCamera()
         if not M.running or not state.alive then return end
         if M.Blocked() then M.SetMarker(false);return end
-        if M.target~=Enum.MouseBehavior.LockCenter or (M.recoverUntil and os.clock()<M.recoverUntil) then return end
-        if not (M.first or M.shift or M.rightHeld or M.rightToggle) then return end
+        if M.target~=Enum.MouseBehavior.LockCenter and not (cfg.mobiladorManual and M.target==Enum.MouseBehavior.Default) then return end
+        if M.target==Enum.MouseBehavior.LockCenter and not (M.shift or not cfg.mobiladorManual and (M.first or M.rightHeld or M.rightToggle)) then return end
+        if M.recoverUntil and os.clock()<M.recoverUntil then return end
         if M.retryAt and os.clock()<M.retryAt or (M.failures or 0)>=3 then return end
-        M.Write("MouseBehavior",Enum.MouseBehavior.LockCenter)
+        M.Write("MouseBehavior",M.target)
     end
     local function pointerHitsUI(input)
         local point=input.Position
@@ -1970,7 +2083,7 @@ do
         -- Native camera/aim bindings can mark real mouse input as processed, too.
         if processed and input.UserInputType==Enum.UserInputType.MouseButton2 and pointerHitsUI(input) then return end
         if input.UserInputType==Enum.UserInputType.MouseButton2 then
-            if cfg.mobiladorRightMode=="Desligado" then return end
+            if cfg.mobiladorManual or cfg.mobiladorRightMode=="Desligado" then return end
             M.seenMouse=true
             if M.rightDown then return end
             M.rightDown=true;M.rightSeenDown=false;M.rightUpSince=nil
@@ -1999,13 +2112,14 @@ do
         stats.maxDelta=math.max(stats.maxDelta,math.abs(x),math.abs(y))
     end
     function M.Stop()
+        M.CancelBind()
         M.running=false;M.target=nil;M.camera=nil;M.first=false;M.recoverUntil=nil
         M.ClearPresses(true)
         for _,connection in ipairs(M.connections) do connection:Disconnect() end;M.connections={}
         Run:UnbindFromRenderStep(binding);M.ReleaseAll();M.Status("DESLIGADO","desligado")
     end
     function M.Destroy()
-        M.Stop();markerGui:Destroy()
+        M.Stop();if M.imageConnection then M.imageConnection:Disconnect();M.imageConnection=nil end;markerGui:Destroy()
     end
     function M.Configure()
         if M.resolvingKeys then return end
@@ -2021,8 +2135,8 @@ do
         end
         M.resolvingKeys=false
         if M.shiftKey~=cfg.mobiladorShiftKey or not cfg.mobiladorShift then M.shift=false;M.keyDown=false end
-        if M.rightMode~=cfg.mobiladorRightMode then M.ClearPresses(false) end
-        M.shiftKey=cfg.mobiladorShiftKey;M.rightMode=cfg.mobiladorRightMode
+        if M.rightMode~=cfg.mobiladorRightMode or M.manual~=cfg.mobiladorManual then M.ClearPresses(false) end
+        M.shiftKey=cfg.mobiladorShiftKey;M.rightMode=cfg.mobiladorRightMode;M.manual=cfg.mobiladorManual;M.markerDirty=true
         M.failures=0;M.retryAt=nil;M.lastError=nil
         if M.running then M.SetMarker(M.target==Enum.MouseBehavior.LockCenter and not M.Blocked());return end
         M.running=true;M.focused=true;M.camera=workspace.CurrentCamera;M.first=false
@@ -2038,7 +2152,7 @@ do
             M.connections[#M.connections+1]=GuiService.MenuClosed:Connect(function() M.menuOpen=false;M.ClearPresses(false);M.target=nil end)
         end
         Run:BindToRenderStep(binding,Enum.RenderPriority.Camera.Value-1,M.BeforeCamera)
-        M.Status("PRONTO","feche o painel para usar Shift ou botao direito")
+        M.Status("PRONTO","feche o painel; "..cfg.mobiladorShiftKey.." prende / solta")
     end
     function M.Snapshot()
         local cam=workspace.CurrentCamera
@@ -2057,10 +2171,13 @@ do
             firstPerson=M.first,shift=M.shift,rightHeld=M.rightHeld,rightToggle=M.rightToggle,rightMode=cfg.mobiladorRightMode,
             sensitivity=Input.MouseDeltaSensitivity,delta=gotDelta and delta or nil,
             stats=stats,transitions=events,lastError=M.lastError,rightButtonReadback=gotButton and rightDown or false,
-            leftDown=M.leftDown,markerEnabled=markerGui.Enabled,markerSize=cfg.mobiladorReticleSize}
+            leftDown=M.leftDown,manualOnly=cfg.mobiladorManual,captureKey=cfg.mobiladorShiftKey,
+            markerEnabled=markerGui.Enabled,markerSize=cfg.mobiladorReticleSize,markerStyle=cfg.mobiladorReticleStyle,
+            customImageLoaded=image.IsLoaded==true}
     end
     for _,key in ipairs({"mobilador","mobiladorShift","mobiladorShiftKey","mobiladorRightMode","mobiladorRecoverKey",
-        "mobiladorCustomCamera","mobiladorFixedSensitivity","mobiladorSensitivity","mobiladorReticle","mobiladorReticleSize"}) do actions[key]=M.Configure end
+        "mobiladorCustomCamera","mobiladorFixedSensitivity","mobiladorSensitivity","mobiladorReticle","mobiladorReticleSize","mobiladorManual",
+        "mobiladorReticleStyle","mobiladorReticleColor","mobiladorReticleThickness","mobiladorReticleGap","mobiladorReticleOpacity","mobiladorReticleImage"}) do actions[key]=M.Configure end
 end
 -- End mobilador capture compatibility.
 
@@ -2901,12 +3018,14 @@ do
     end
     function K.BeginBind()
         if not state.alive or state.booting then return end
+        if API.Mobilador then API.Mobilador.CancelBind() end
         K.ClearLook()
         K.binding=true
         API.LockKeyButton.Text="Aperte uma tecla | Esc cancela"
     end
     function K.OnInput(input,processed)
         if not state.alive or state.booting then return end
+        if API.Mobilador and API.Mobilador.bindKey then return end
         if input.UserInputType~=Enum.UserInputType.Keyboard or Input:GetFocusedTextBox() then return end
         if K.binding then
             if input.KeyCode==Enum.KeyCode.Escape then K.CancelBind();return end
