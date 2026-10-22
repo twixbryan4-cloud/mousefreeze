@@ -1,6 +1,14 @@
 # Huss Valley Panel
 
-Versão 0.6.26 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.27 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Mais liberdade lateral no Lock On na versão 0.6.27
+
+Em **Combat → Player Lock On**, o novo ajuste **Liberdade lateral (Console)** controla o limite do giro manual para cada lado, entre **26 e 110 graus**. O padrão passa a ser **85 graus**; 26 reproduz o limite anterior. Isso dá mais margem para virar a câmera antes de um dash lateral. O ajuste não modifica a suavidade, os studs, a previsão, os filtros, o Auto Face Target ou as outras escolhas salvas. Perfis antigos usam 85 somente para este campo novo, mantendo seus demais valores.
+
+A mudança amplia o deslocamento horizontal permitido enquanto o alvo permanece selecionado. Sensibilidade de toque/mouse/controle, limite vertical de 18 graus, curva elevada de perto, acompanhamento de alvos no ar e retorno ao alvo conservam suas rotinas anteriores. Ao diminuir o novo limite, o deslocamento manual é limitado sem soltar o alvo ou reiniciar a câmera. O modo Classico mantém seu código. A direção efetiva do dash continua dependendo do controle do próprio jogo.
+
+O ajuste usa os mesmos eventos de entrada e o mesmo controlador de câmera; não adiciona listeners, temporizadores ou loops. A validação local cobre sintaxe completa com Lua 5.4, giro além do limite anterior, compatibilidade em 26 graus, retorno da assistência, alterações durante o acompanhamento e carregar/salvar perfis antigos. Os resultados de movimento e dash no Roblox/Delta ainda precisam ser conferidos no aparelho.
 
 ## Remoção do Combat Warriors na versão 0.6.26
 

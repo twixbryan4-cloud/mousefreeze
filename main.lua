@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.26
+-- Huss Valley Panel 0.6.27
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -29,7 +29,7 @@ local defaults = {
     mobiladorReticleThickness=2, mobiladorReticleGap=4, mobiladorReticleOpacity=100, mobiladorReticleImage="",
     firstPerson=false, unlockMouse=false, fov=70, customFov=false, fullbright=false, xray=false,
     lockOn=false, radius=30, prediction=0.12, aimSmooth=12, faceTarget=false, teamCheck=false,
-    lockMode="Console", lockButton=false, lockKey="L", lockReleaseRange=80, lockWallCheck=true,
+    lockMode="Console", lockButton=false, lockKey="L", lockReleaseRange=80, lockWallCheck=true, lockCameraFreedom=85,
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
     autoRevive=false, autoPick=false, promptDelay=0.6,
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
@@ -54,7 +54,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.26", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.27", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -342,7 +342,7 @@ local requiresAdapter={autoDash="AutoDash",autoZone="AutoZone",autoDown="AutoDow
     autoWheel="AutoSpinWheel",autoJourney="AutoClaimJourney",autoVote="AutoMapVote",disableGameAFK="DisableGameAFK",
     hitbox="HitBox",leaderboard="LeaderboardVisuals",gems="GemsAndCoins",antiHit="AntiHit"}
 local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
-    prediction={0,0.5},aimSmooth={1,25},lockReleaseRange={5,250},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
+    prediction={0,0.5},aimSmooth={1,25},lockReleaseRange={5,250},lockCameraFreedom={26,110},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
     shaderExposure={-1,1},shaderBloom={0,0.6},shaderTemperature={-1,1},uiScale={0.45,1.6},opacity={0.15,1},transparency={0,85},
@@ -873,7 +873,7 @@ slider(c,"WalkSpeed","walkSpeed",8,150,1)
 c=card(left,"Auto Zone","autoZone","Ao ligar, faz um unico TP para a zona segura registrada. A zona B do registro e reconhecida pela area Safe carregada; pontos de outros mapas nao sao reutilizados.")
 API.NativeStatusLabels.zone=text(c,"Destino: zona B registrada",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
 actionButton(c,"Marcar zona aqui",function() if API.Native then API.Native.CaptureZone() end end)
-c=card(left,"Player Lock On","lockOn","Console: botao ou tecla escolhe/solta o alvo. Permite girar um pouco com assistencia continua; aproxima em vista elevada e olha para cima se o alvo subir.")
+c=card(left,"Player Lock On","lockOn","Console: botao ou tecla escolhe/solta o alvo. Liberdade lateral ajustavel com assistencia continua; aproxima em vista elevada e olha para cima se o alvo subir.")
 cycle(c,"Modo","lockMode",{"Console","Classico"})
 checkbox(c,"Mostrar botao flutuante","lockButton")
 API.LockKeyButton=actionButton(c,"Tecla: L (toque para trocar)",function() if API.LockOn then API.LockOn.BeginBind() end end)
@@ -884,6 +884,7 @@ slider(c,"Raio para escolher alvo","radius",5,150,1," studs")
 slider(c,"Soltar alem de","lockReleaseRange",5,250,1," studs")
 checkbox(c,"Verificar paredes (Console)","lockWallCheck")
 slider(c,"Suavidade da camera","aimSmooth",1,25,1)
+slider(c,"Liberdade lateral (Console)","lockCameraFreedom",26,110,1," graus")
 slider(c,"Prediction (Classico)","prediction",0,0.5,0.01,"s")
 checkbox(c,"Auto Face Target","faceTarget");checkbox(c,"Ignorar mesmo time","teamCheck")
 API.LockStatusLabel=text(c,"Desligado",9,{Size=UDim2.new(1,0,0,36),TextWrapped=true})
@@ -3581,9 +3582,10 @@ do
             and K.target~=nil and not K.suspended and not K.binding and not Input:GetFocusedTextBox()
     end
     function K.AddLook(x,y,sensitivity)
-        -- Bounded offsets keep target assistance active while accepting real look input.
+        -- Lateral freedom is independent of tracking strength and the vertical camera curve.
         if x==0 and y==0 then return end
-        K.manualYaw=math.clamp(K.manualYaw-math.clamp(x*sensitivity,-0.2,0.2),-math.rad(26),math.rad(26))
+        local limit=math.rad(cfg.lockCameraFreedom)
+        K.manualYaw=math.clamp(K.manualYaw-math.clamp(x*sensitivity,-0.2,0.2),-limit,limit)
         K.manualPitch=math.clamp(K.manualPitch-math.clamp(y*sensitivity,-0.16,0.16),-math.rad(18),math.rad(18))
         K.lastLookAt=os.clock()
     end
@@ -3954,6 +3956,10 @@ do
     end
     actions.lockOn=K.Configure;actions.lockMode=K.Configure
     actions.lockKey=K.CancelBind
+    actions.lockCameraFreedom=function(value)
+        local limit=math.rad(value)
+        K.manualYaw=math.clamp(K.manualYaw,-limit,limit)
+    end
     listen(Input.InputBegan,K.OnInput)
     listen(Input.InputBegan,K.LookBegan)
     listen(Input.InputChanged,K.LookChanged)
