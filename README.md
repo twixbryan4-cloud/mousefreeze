@@ -1,6 +1,26 @@
 # Huss Valley Panel
 
-Versão 0.6.24 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.25 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Auto Parry do Combat Warriors por porcentagem na versão 0.6.25
+
+No mesmo loader, abra **Combat → Auto Parry - Combat Warriors**. A opção começa desligada e só pode ser ativada no universo Combat Warriors (1390601379, place principal 4282985734). Equipe uma arma corpo a corpo compatível. Use **Testar parry agora** para conferir a entrada configurada e depois ligue a automação. O teste recolhe o painel e pede um único parry; não liga a automação.
+
+**Chance de reagir** aceita qualquer inteiro de **0% a 100%, de 1 em 1**. O valor inicial é 40%, como no exemplo solicitado. Zero ignora os golpes elegíveis; 100 remove todas as falhas introduzidas pelo sorteio. Valores intermediários fazem uma decisão independente por oportunidade observada: por exemplo, 53% seleciona probabilisticamente 53% dessas oportunidades. Não há cota fixa de acertos por lote, nem novo sorteio a cada quadro para recuperar uma oportunidade ignorada. O resultado real do parry continua dependendo da janela aceita pelo jogo, da chegada do sinal e da rede.
+
+O alcance em **studs** é conferido a cada Heartbeat enquanto há um sinal recente de ataque e novamente antes de enviar a entrada. O sistema também verifica personagem vivo, arma ainda equipada, hitbox presente, direção e parede, conforme as opções. Um adversário que entra no alcance enquanto o sinal ainda está válido pode ser notado no próximo Heartbeat; a posição usada no evento não fica congelada. Sinais de vários adversários mantêm suas decisões separadas e cada oportunidade é tentada no máximo uma vez.
+
+A detecção atual observa Sound.Played sob armas equipadas com Tool.Hitboxes.Hitbox, Weapon1Hitbox ou Weapon2Hitbox. Filtra sons claramente associados a impacto, equipar, bloquear ou parry, além de sons em loop. Sinais da mesma arma a menos de 80 ms são agrupados para evitar decisões duplicadas do mesmo movimento. Essa é uma hipótese de compatibilidade baseada em uma [implementação pública anterior](https://github.com/Fazedrab/Combat-Warriors/blob/main/thescript.lua), e não uma confirmação da estrutura atual de todas as armas. O código foi escrito para esta integração; o script de referência não é carregado nem executado. A primeira reprodução de um sinal compatível é registrada separadamente da aceitação do parry.
+
+Não há slider de atraso de reação. O sinal é avaliado assim que chega. A latência local medida por [Player.GetNetworkPing](https://create.roblox.com/docs/reference/engine/classes/Player#GetNetworkPing), em RTT/segundos, apenas ajusta a vida máxima da oportunidade entre 160 e 350 ms. Essa margem não aumenta os studs nem recupera um golpe cujo sinal já chegou tarde. Há somente a duração técnica de 60 ms para parear a tecla pressionada/solta; o cooldown real continua sendo decidido pelo jogo. Não há promessa de acerto perfeito ou de indetectabilidade.
+
+**Entrada do parry** oferece Automático, Botão e Tecla. Automático procura um único botão Parry/Aparar visível do próprio jogo; se não houver uma rota tentada, pode usar teclado quando disponível. O modo Tecla permite testar explicitamente F, G, E ou R, conforme a configuração real do jogo, inclusive em um cliente híbrido com toque e teclado. Uma falha após execução parcial de callbacks não dispara também o fallback de tecla. A tecla não é tomada se já estiver fisicamente pressionada ou conflitar com um atalho do painel. Não são adivinhados argumentos de remotes.
+
+O painel aberto, campos de texto, menu Roblox, perda de foco e remoção do personagem cancelam trabalho pendente e soltam a tecla pertencente ao módulo. Desativar e encerrar desconectam os observadores. Respawns, novas armas e remoção de sons atualizam os vínculos, com limite de 64 sons por personagem. O módulo usa o Heartbeat já existente e observadores de sinais; não percorre todos os jogadores por quadro. Os sistemas anteriores de câmera, Shift/V, cursor, ESP, ações Huss Valley, botões e gráficos mantêm seu código.
+
+**Copiar diagnóstico de parry** distingue sinais observados, oportunidades elegíveis, decisões selecionadas/ignoradas e entradas enviadas. Uma entrada enviada fica expressamente sem confirmação de defesa pelo servidor. Se o teste manual não acionar o parry ou não surgirem sinais de golpe, esse diagnóstico informa a rota, arma compatível, observadores e último erro para ajustar a integração.
+
+Validação local: sintaxe do arquivo completo com Lua 5.4 e **31 casos simulados / 200 asserções**, incluindo probabilidades 0/1/17/23/40/53/67/92/99/100%, distribuição controlada, ausência de novo sorteio por quadro, múltiplos adversários, studs atuais, revalidação no envio, RTT, expiração, botões, falhas de APIs e limpeza. A comparação com a v0.6.24 verifica que as alterações fora do módulo são apenas configuração, interface e integração do ciclo de vida. Execução no Roblox/Delta e aceitação pelo Combat Warriors ainda não foram testadas neste ambiente.
 
 ## Diagnóstico de segurar com o mouse e sentar com Shift na versão 0.6.24
 
@@ -602,6 +622,7 @@ As opções começam desligadas. O ESP possui frequência de dados e distância 
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
 
 Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
+
 
 
 

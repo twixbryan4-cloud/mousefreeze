@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.24
+-- Huss Valley Panel 0.6.25
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -31,6 +31,8 @@ local defaults = {
     lockOn=false, radius=30, prediction=0.12, aimSmooth=12, faceTarget=false, teamCheck=false,
     lockMode="Console", lockButton=false, lockKey="L", lockReleaseRange=80, lockWallCheck=true,
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
+    cwAutoParry=false,cwParryRange=14,cwParryChance=40,cwParryFacing=true,cwParryWall=true,cwParryTeam=true,
+    cwParryInput="Automatico",cwParryKey="F",
     autoRevive=false, autoPick=false, promptDelay=0.6,
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
     autoAbility=false, dashSide="Right",dashRange=15,dashDelay=1,dashKey="Q",dashKeyboardFallback=false,tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
@@ -54,7 +56,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.24", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.25", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -341,7 +343,7 @@ local requiresAdapter={autoDash="AutoDash",autoZone="AutoZone",autoDown="AutoDow
     dashCooldown="DashCooldown",autoAbility="AutoAbility",runnerAI="RunnerAI",catcherAI="CatcherAI",
     autoWheel="AutoSpinWheel",autoJourney="AutoClaimJourney",autoVote="AutoMapVote",disableGameAFK="DisableGameAFK",
     hitbox="HitBox",leaderboard="LeaderboardVisuals",gems="GemsAndCoins",antiHit="AntiHit"}
-local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
+local ranges={cwParryRange={4,20},cwParryChance={0,100},walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
     prediction={0,0.5},aimSmooth={1,25},lockReleaseRange={5,250},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
@@ -358,6 +360,8 @@ local function valid(key,value,keyContext)
     elseif key=="accent" and not palette[value] then return false
     elseif key=="dashSide" and value~="Right" and value~="Left" then return false
     elseif key=="lockMode" and value~="Console" and value~="Classico" then return false
+    elseif key=="cwParryInput" and value~="Automatico" and value~="Botao" and value~="Tecla" then return false
+    elseif key=="cwParryKey" and value~="F" and value~="G" and value~="E" and value~="R" then return false
     elseif key=="mobiladorRightMode" and value~="Segurar" and value~="Alternar" and value~="Desligado" then return false
     elseif key=="mobiladorCursorScope" and value~="Sempre" and value~="So na captura" then return false
     elseif key=="mobiladorReticleStyle" and value~="Cruz" and value~="Ponto" and value~="Circulo" and value~="Cruz e ponto" and value~="Imagem" then return false
@@ -395,6 +399,9 @@ set=function(key,value,quiet,keyContext)
         return false
     end
     if key=="unlockFPS" and newValue and type(setfpscap)~="function" and type(env.setfpscap)~="function" then notify("Esta versao do executor nao fornece setfpscap."); return false end
+    if key=="cwAutoParry" and newValue and API.CombatWarriors and not API.CombatWarriors.IsGame() then
+        API.CombatWarriors.Status("Disponivel somente no Combat Warriors");notify("Auto Parry especifico do Combat Warriors.");return false
+    end
     if key=="pcInputMode" and newValue and API.InputMode then
         local available,reason=API.InputMode.CanEnable()
         if not available then API.InputMode.Status(reason);notify(reason);return false end
@@ -916,6 +923,21 @@ actionButton(c,"Gravar 20s agora",function() API.StartHitDiagnostics(false) end)
 actionButton(c,"Encerrar e copiar",function() API.StopHitDiagnostics(true) end)
 actionButton(c,"Copiar ultimo registro",function() API.CopyHitDiagnostics() end)
 actionButton(c,"Gravar rodada inteira",function() API.StartGeneralDiagnostics() end)
+do
+    local content=card(right,"Auto Parry - Combat Warriors","cwAutoParry","Escolha de 0 a 100%, de 1 em 1. 100% remove falhas propositais; 0% ignora. Revalida studs, arma e direcao. A defesa real depende do sinal do golpe e do jogo.")
+    slider(content,"Alcance","cwParryRange",4,20,0.5," studs")
+    slider(content,"Chance de reagir","cwParryChance",0,100,1,"%")
+    checkbox(content,"Ataque voltado para voce","cwParryFacing")
+    checkbox(content,"Verificar paredes","cwParryWall")
+    checkbox(content,"Ignorar mesmo time","cwParryTeam")
+    cycle(content,"Entrada do parry","cwParryInput",{"Automatico","Botao","Tecla"})
+    cycle(content,"Tecla configurada no jogo","cwParryKey",{"F","G","E","R"})
+    API.CWParryStatus=text(content,"Status: desligado",9,{Size=UDim2.new(1,0,0,44),TextWrapped=true})
+    actionButton(content,"Testar parry agora",function()
+        if API.CombatWarriors then show(false);task.defer(function() if state.alive then API.CombatWarriors.Test() end end) end
+    end)
+    actionButton(content,"Copiar diagnostico de parry",function() if API.CopyCWParryDiagnostics then API.CopyCWParryDiagnostics() end end)
+end
 left,right=page("AI",3)
 pending(left,"Runner AI","runnerAI");pending(right,"Catcher AI","catcherAI")
 local info=card(left,"Huss Valley / integracao",nil,"O caminho do mapa, zonas seguras, equipes e controles precisam ser identificados dentro do jogo. Use o diagnostico para a proxima etapa.")
@@ -4063,6 +4085,311 @@ for key,name in pairs(requiresAdapter) do actions[key]=function(v)
             IsActive=function() return state.alive and cfg[key] and adapterGeneration[key]==generation and player.Character==char end})
     end
 end end
+-- Combat Warriors: event-driven hitbox-sound parry, isolated from other game adapters.
+do
+    local C={running=false,generation=0,connections={},records={},pending={},focused=true,nextAt=0,buttons={},scanAt=-math.huge,
+        random=Random.new(),attackSerial=0,pingAt=-math.huge,
+        stats={signals=0,sent=0,failed=0,duplicates=0,expired=0,opportunities=0,chancePassed=0,chanceSkipped=0},signalCompatibility="unverified"}
+    API.CombatWarriors=C
+    local hitboxNames={Hitbox=true,Weapon1Hitbox=true,Weapon2Hitbox=true}
+    local function disconnect(list) for _,connection in pairs(list) do connection:Disconnect() end end
+    local function count(key) C.stats[key]=(C.stats[key] or 0)+1 end
+    function C.IsGame() return game.GameId==1390601379 or game.PlaceId==4282985734 end
+    function C.Status(message)
+        C.message=message;local label=API.CWParryStatus;local value="Status: "..message
+        if label and label.Text~=value then label.Text=value end
+    end
+    function C.Freshness()
+        local now=os.clock()
+        if now-C.pingAt>=1 then
+            C.pingAt=now
+            local ok,value=pcall(player.GetNetworkPing,player)
+            C.pingRTT=ok and type(value)=="number" and value==value and value>=0 and value<math.huge and value or nil
+        end
+        -- GetNetworkPing is RTT in seconds. This bounds cue lifetime; it never waits or expands studs.
+        return math.clamp(0.16+(C.pingRTT or 0)*0.5,0.16,0.35)
+    end
+    function C.Melee(char)
+        local tool=char and char:FindFirstChildOfClass("Tool");local boxes=tool and tool:FindFirstChild("Hitboxes")
+        if boxes then for name in pairs(hitboxNames) do local part=boxes:FindFirstChild(name);if part and part:IsA("BasePart") then return tool end end end
+    end
+    function C.Ready(manual)
+        if not state.alive or not C.IsGame() then return nil,"Disponivel somente no Combat Warriors" end
+        if not manual and (not C.running or not cfg.cwAutoParry) then return nil,"Desligado" end
+        if state.booting or state.visible or not C.focused or C.menuOpen or Input:GetFocusedTextBox() then return nil,"Aguardando fechar menu ou campo de texto" end
+        local char,hum,root=character()
+        if not char or not hum or not root or hum.Health<=0 then return nil,"Aguardando personagem vivo" end
+        if hum.PlatformStand or hum.Sit then return nil,"Aguardando personagem de pe" end
+        if not C.Melee(char) then return nil,"Equipe uma arma com hitbox compativel" end
+        return char,hum,root
+    end
+    function C.ReleaseKey()
+        local manager,key=C.manager,C.heldKey;C.heldKey=nil;C.manager=nil;C.keyToken=nil
+        if C.releaseTimer and type(task.cancel)=="function" then pcall(task.cancel,C.releaseTimer) end;C.releaseTimer=nil
+        if manager and key then pcall(manager.SendKeyEvent,manager,false,key,false,game) end
+    end
+    function C.ClearWork()
+        C.generation=C.generation+1;C.pending={};C.busy=false;C.ReleaseKey()
+        if C.worker and type(task.cancel)=="function" then pcall(task.cancel,C.worker) end;C.worker=nil
+    end
+    local function visible(button,root)
+        local object=button
+        while object and object~=root do
+            if object==gui or object:IsA("GuiObject") and not object.Visible or object:IsA("ScreenGui") and not object.Enabled then return false end
+            object=object.Parent
+        end
+        return object==root
+    end
+    local function labelMatch(value)
+        if type(value)~="string" then return false end
+        value=string.lower(value:gsub("<[^>]->","")):match("^%s*(.-)%s*$")
+        return value=="parry" or value=="parrybutton" or value=="parrybtn" or value=="touchparry" or value=="aparar"
+    end
+    local function findButton()
+        local root=player:FindFirstChildOfClass("PlayerGui");if not root then return nil,"Botao de parry indisponivel" end
+        if os.clock()-C.scanAt>=3 then
+            C.scanAt=os.clock();C.buttons={}
+            local objects=root:GetDescendants()
+            for index,object in ipairs(objects) do
+                if index>4000 then break end
+                if object:IsA("GuiButton") and not object:IsDescendantOf(gui) then
+                    local match=labelMatch(object.Name) or object:IsA("TextButton") and labelMatch(object.Text)
+                    if not match then for _,child in ipairs(object:GetChildren()) do if child:IsA("TextLabel") and labelMatch(child.Text) then match=true;break end end end
+                    if match and #C.buttons<12 then C.buttons[#C.buttons+1]=object end
+                end
+            end
+        end
+        local found
+        for _,button in ipairs(C.buttons) do if button.Parent and visible(button,root) then
+            if found then return nil,"Mais de um botao Parry visivel; selecione entrada por tecla" end;found=button
+        end end
+        return found,found and nil or "Botao de parry indisponivel"
+    end
+    local function pressButton(isActive)
+        local button,reason=findButton();if not button then return false,reason,false end
+        local inspect=getconnections or env.getconnections;local fire=firesignal or env.firesignal
+        local fallbackSignal
+        for _,name in ipairs({"Activated","MouseButton1Click"}) do
+            local signal=button[name];local callbacks={}
+            local inspected,nonempty=false,false
+            if type(inspect)=="function" then
+                local ok,list=pcall(inspect,signal)
+                if ok and type(list)=="table" then inspected=true;nonempty=next(list)~=nil;for index,connection in ipairs(list) do
+                    if index>16 then break end
+                    local got,fn=pcall(function() if connection.Enabled~=false and connection.Connected~=false then return connection.Function end end)
+                    if got and type(fn)=="function" then callbacks[#callbacks+1]=fn end
+                end end
+            end
+            if #callbacks>0 then
+                for _,callback in ipairs(callbacks) do
+                    if not isActive() then return false,"Acao cancelada",true end
+                    if not pcall(callback,nil,1) then return false,"Falha no botao de parry",true end
+                end
+                return true,"Botao Parry do jogo",true
+            elseif not fallbackSignal and (not inspected or nonempty) then
+                fallbackSignal=signal
+            end
+        end
+        if fallbackSignal and type(fire)=="function" then
+            if not isActive() then return false,"Acao cancelada",true end
+            local ok,result=pcall(fire,fallbackSignal,nil,1);ok=ok and result~=false
+            return ok,ok and "Sinal do botao Parry" or "Falha no sinal Parry",true
+        end
+        return false,"Callbacks do botao indisponiveis",false
+    end
+    local function pressKey(isActive)
+        local name=cfg.cwParryKey;local key=Enum.KeyCode[name]
+        if name==cfg.toggleKey or name==cfg.lockKey or cfg.mobilador and (name==cfg.mobiladorShiftKey or name==cfg.mobiladorRecoverKey) then return false,"Tecla conflita com um atalho do painel" end
+        if not key or Input:IsKeyDown(key) then return false,"Tecla de parry ja esta pressionada" end
+        local got,manager=pcall(game.GetService,game,"VirtualInputManager")
+        if not got or not manager then return false,"VirtualInputManager indisponivel no executor" end
+        if not isActive() then return false,"Acao cancelada" end
+        local ok,result=pcall(manager.SendKeyEvent,manager,true,key,false,game)
+        if not ok or result==false then pcall(manager.SendKeyEvent,manager,false,key,false,game);return false,"Executor nao aceitou a tecla de parry" end
+        C.manager=manager;C.heldKey=key;local token={};C.keyToken=token
+        C.releaseTimer=task.delay(0.06,function() if C.keyToken==token then C.releaseTimer=nil;C.ReleaseKey() end end)
+        return true,"Tecla "..name
+    end
+    function C.Trigger(threat,manual)
+        local char,reason=C.Ready(manual);if not char then C.Status(reason);return false end
+        local now=os.clock()
+        if C.busy or now<C.nextAt then return false end
+        C.nextAt=now+0.06;C.busy=true -- only serialize the owned key-down/up pair, not a reaction delay.
+        local generation=C.generation
+        local function active()
+            if C.generation~=generation or player.Character~=char then return false end
+            local current,hum,root=C.Ready(manual);if not current then return false end
+            if not manual and threat then return os.clock()<=threat.expires and C.Check(threat.player,threat,current,hum,root)~=nil end
+            return true
+        end
+        C.worker=task.spawn(function()
+            if not active() then if C.generation==generation then C.busy=false end;return end
+            local sent,source,attempted=false,nil,false
+            local ok,err=pcall(function()
+                if cfg.cwParryInput~="Tecla" then sent,source,attempted=pressButton(active) end
+                if not sent and not attempted and cfg.cwParryInput~="Botao" then
+                    if cfg.cwParryInput=="Tecla" or Input.KeyboardEnabled then sent,source=pressKey(active)
+                    else source=source or "Sem botao Parry; selecione Tecla para testar a entrada do jogo" end
+                end
+            end)
+            if C.generation~=generation then return end
+            C.busy=false;C.worker=nil
+            if not ok then sent=false;source="Falha ao acionar parry";C.lastError=tostring(err):sub(1,180) end
+            if sent then count("sent");C.lastInput={at=os.clock(),source=source,confirmed=false};C.Status("Entrada enviada: "..source.."; parry nao confirmado")
+            else count("failed");C.Status(source or "Entrada de parry indisponivel") end
+        end)
+        return true
+    end
+    local function canonical(sound,char)
+        if not sound:IsA("Sound") or sound.Looped then return end
+        local part=sound.Parent;local boxes=part and part.Parent;local tool=boxes and boxes.Parent
+        if not part or not part:IsA("BasePart") or not hitboxNames[part.Name] or not boxes or boxes.Name~="Hitboxes" or not tool or not tool:IsA("Tool") or tool.Parent~=char then return end
+        local name=string.lower(sound.Name)
+        if not (name:find("swing",1,true) or name:find("slash",1,true) or name:find("attack",1,true)) and
+            (name:find("impact",1,true) or name:find("parry",1,true) or name:find("block",1,true) or name:find("equip",1,true) or name:match("^hit")) then return end
+        return tool,part
+    end
+    function C.Note(record,sound)
+        if not C.running or not cfg.cwAutoParry or record.player.Character~=record.char then return end
+        local tool,part=canonical(sound,record.char);if not tool then return end
+        local char=C.Ready(false);if not char then return end
+        local now=os.clock();count("signals");C.signalCompatibility="hitbox sound observed"
+        if record.attack and record.attack.tool==tool and now-record.attack.at<0.08 then count("duplicates");return end
+        C.attackSerial=C.attackSerial+1
+        local threat={id=C.attackSerial,player=record.player,char=record.char,tool=tool,part=part,at=now,expires=now+C.Freshness(),
+            source=sound.Name:sub(1,80),enemy=record.player.Name}
+        record.attack=threat;C.pending[record.player]=threat
+    end
+    function C.UnwatchSound(record,sound)
+        local connection=record.sounds[sound]
+        if connection then connection:Disconnect();record.sounds[sound]=nil;record.soundCount=record.soundCount-1 end
+    end
+    function C.WatchSound(record,sound)
+        if record.sounds[sound] or record.soundCount>=64 or not canonical(sound,record.char) then return end
+        record.sounds[sound]=sound.Played:Connect(function() C.Note(record,sound) end);record.soundCount=record.soundCount+1
+        if sound.IsPlaying then C.Note(record,sound) end
+    end
+    function C.DropCharacter(record)
+        disconnect(record.charConnections);disconnect(record.sounds);record.charConnections={};record.sounds={};record.soundCount=0
+        C.pending[record.player]=nil;record.char=nil;record.attack=nil
+    end
+    function C.BindCharacter(record,char)
+        C.DropCharacter(record);record.char=char
+        record.charConnections={char.DescendantAdded:Connect(function(object) if C.running and record.char==char then C.WatchSound(record,object) end end),
+            char.DescendantRemoving:Connect(function(object) C.UnwatchSound(record,object) end)}
+        for index,object in ipairs(char:GetDescendants()) do if index>1200 then break end;C.WatchSound(record,object) end
+    end
+    function C.WatchPlayer(p)
+        if p==player or C.records[p] then return end
+        local record={player=p,charConnections={},sounds={},soundCount=0,connections={}};C.records[p]=record
+        record.connections={p.CharacterAdded:Connect(function(char) if C.running then C.BindCharacter(record,char) end end),
+            p.CharacterRemoving:Connect(function(char) if record.char==char then C.DropCharacter(record) end end)}
+        if p.Character then C.BindCharacter(record,p.Character) end
+    end
+    function C.UnwatchPlayer(p)
+        local record=C.records[p];if not record then return end
+        C.DropCharacter(record);disconnect(record.connections);C.records[p]=nil
+    end
+    local function facing(root,direction)
+        local look=root.CFrame.LookVector;look=Vector3.new(look.X,0,look.Z);direction=Vector3.new(direction.X,0,direction.Z)
+        return look.Magnitude>0.001 and direction.Magnitude>0.001 and look.Unit:Dot(direction.Unit)>=0.25
+    end
+    function C.Check(p,threat,char,hum,root)
+        local record=C.records[p]
+        if not record or record.char~=threat.char or record.attack~=threat then return nil,"staleSkipped" end
+        if p.Parent~=Players or p.Character~=threat.char or threat.tool.Parent~=threat.char then return nil,"staleSkipped" end
+        local part=threat.part
+        if not part or not part.Parent or part.Parent.Name~="Hitboxes" or part.Parent.Parent~=threat.tool then return nil,"staleSkipped" end
+        local a=actor(p);if not a.hum or not a.root or a.hum.Health<=0 then return nil,"staleSkipped" end
+        if cfg.cwParryTeam and player.Team and p.Team==player.Team and player.Neutral~=true and p.Neutral~=true then return nil,"teamSkipped" end
+        local delta=a.root.Position-root.Position;local distance=delta.Magnitude
+        if distance~=distance or distance==math.huge then return nil,"staleSkipped" end
+        if distance>cfg.cwParryRange or distance<0.01 then return nil,"rangeSkipped" end
+        if cfg.cwParryFacing and (not facing(a.root,-delta) or not facing(root,delta)) then return nil,"facingSkipped" end
+        if cfg.cwParryWall then
+            local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.FilterDescendantsInstances={char,threat.char};params.IgnoreWater=true
+            pcall(function() params.RespectCanCollide=true end)
+            if workspace:Raycast(root.Position+Vector3.new(0,1,0),delta,params) then return nil,"wallSkipped" end
+        end
+        return distance
+    end
+    function C.Step(now)
+        if not C.running then return end
+        local char,hum,root=C.Ready(false)
+        if not char then if C.busy or C.heldKey or next(C.pending) then C.ClearWork() end;return end
+        local best,bestDistance
+        for p,threat in pairs(C.pending) do
+            if now>threat.expires then C.pending[p]=nil;count("expired")
+            else
+                local distance,reason=C.Check(p,threat,char,hum,root)
+                if not distance then
+                    if threat.lastReject~=reason then count(reason);threat.lastReject=reason end
+                    if reason=="staleSkipped" then C.pending[p]=nil end
+                elseif not C.busy and now>=C.nextAt then
+                    if threat.selected==nil then
+                        local chance=cfg.cwParryChance
+                        local roll=chance>0 and chance<100 and C.random:NextNumber(0,100) or nil
+                        threat.selected=chance>=100 or chance>0 and roll<chance
+                        threat.chance=chance;count("opportunities");count(threat.selected and "chancePassed" or "chanceSkipped")
+                        C.lastDecision={id=threat.id,enemy=threat.enemy,chance=chance,roll=roll,selected=threat.selected}
+                    end
+                    if not threat.selected then C.pending[p]=nil
+                    elseif not bestDistance or distance<bestDistance then best=threat;bestDistance=distance end
+                end
+            end
+        end
+        if best and not C.busy and now>=C.nextAt then
+            C.pending[best.player]=nil;C.lastThreat={id=best.id,enemy=best.enemy,source=best.source,distance=bestDistance,at=best.at,chance=best.chance}
+            C.Trigger(best,false)
+        end
+    end
+    function C.Stop()
+        C.running=false;C.ClearWork()
+        disconnect(C.connections);C.connections={}
+        local list={};for p in pairs(C.records) do list[#list+1]=p end;for _,p in ipairs(list) do C.UnwatchPlayer(p) end
+    end
+    function C.Configure(value)
+        C.Stop()
+        if not value then C.Status("Desligado");return end
+        if not C.IsGame() then C.Status("Disponivel somente no Combat Warriors");error("Combat Warriors requerido") end
+        C.running=true;C.focused=true;C.menuOpen=false;C.nextAt=0;C.scanAt=-math.huge
+        C.connections={Players.PlayerAdded:Connect(C.WatchPlayer),Players.PlayerRemoving:Connect(C.UnwatchPlayer),
+            player.CharacterAdded:Connect(function() C.ClearWork();C.scanAt=-math.huge end),
+            player.CharacterRemoving:Connect(C.ClearWork),
+            Input.WindowFocusReleased:Connect(function() C.focused=false;C.ClearWork() end),
+            Input.WindowFocused:Connect(function() C.focused=true end),Input.TextBoxFocused:Connect(C.ClearWork)}
+        local function buttonChanged(object)
+            if object:IsA("GuiButton") and (labelMatch(object.Name) or object:IsA("TextButton") and labelMatch(object.Text))
+                or object:IsA("TextLabel") and labelMatch(object.Text) then C.scanAt=-math.huge end
+        end
+        C.connections[#C.connections+1]=player.DescendantAdded:Connect(buttonChanged)
+        C.connections[#C.connections+1]=player.DescendantRemoving:Connect(buttonChanged)
+        local ok,service=pcall(game.GetService,game,"GuiService")
+        if ok and service then
+            C.connections[#C.connections+1]=service.MenuOpened:Connect(function() C.menuOpen=true;C.ClearWork() end)
+            C.connections[#C.connections+1]=service.MenuClosed:Connect(function() C.menuOpen=false end)
+        end
+        for _,p in ipairs(Players:GetPlayers()) do C.WatchPlayer(p) end
+        C.Status("Aguardando sinal de golpe; teste o comando de parry")
+    end
+    function C.Test() return C.Trigger(nil,true) end
+    function C.ResetInput() C.ClearWork();C.scanAt=-math.huge end
+    function C.Snapshot()
+        local stats={};for key,value in pairs(C.stats) do stats[key]=value end
+        local watched,sounds,compatible=0,0,0
+        for _,record in pairs(C.records) do watched=watched+1;sounds=sounds+record.soundCount;if C.Melee(record.char) then compatible=compatible+1 end end
+        return {kind="CWParryDiagnostics",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,isCombatWarriors=C.IsGame(),
+            enabled=cfg.cwAutoParry,running=C.running,message=C.message,signalCompatibility=C.signalCompatibility,
+            watchedPlayers=watched,watchedSounds=sounds,compatibleEnemyWeapons=compatible,stats=stats,lastThreat=C.lastThreat,lastDecision=C.lastDecision,lastInput=C.lastInput,lastError=C.lastError,
+            pingRTTms=C.pingRTT and C.pingRTT*1000 or nil,freshnessSeconds=math.clamp(0.16+(C.pingRTT or 0)*0.5,0.16,0.35),
+            settings={range=cfg.cwParryRange,chance=cfg.cwParryChance,facing=cfg.cwParryFacing,wall=cfg.cwParryWall,
+                team=cfg.cwParryTeam,input=cfg.cwParryInput,key=cfg.cwParryKey},
+            limitation="Hitbox-sound compatibility and native parry acceptance require an in-game test; sent input is not confirmed parry or undetectability."}
+    end
+    actions.cwAutoParry=C.Configure;actions.cwParryInput=C.ResetInput;actions.cwParryKey=C.ResetInput
+end
+-- End Combat Warriors parry.
+
 -- Native commands transcribed from the user's runtime trace, never enabled by default.
 do
     local N={Status={},Mapped={},ProximityAdapters={},ProximityReady={}}
@@ -5076,6 +5403,9 @@ end
 function API.CopyInputModeDiagnostics()
     return presentDiagnostic(Http:JSONEncode(API.InputMode.Snapshot()),"Diagnostico de entrada copiado.")
 end
+function API.CopyCWParryDiagnostics()
+    return presentDiagnostic(Http:JSONEncode(API.CombatWarriors.Snapshot()),"Diagnostico de parry copiado.")
+end
 function API.CopyLockDiagnostics()
     local k=API.LockOn;local cam=workspace.CurrentCamera
     local report={kind="LockOnRelease",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
@@ -5769,6 +6099,10 @@ listen(Run.Heartbeat,function(dt)
         lastAction.promptPending=false
     end
     stepAdapters(dt)
+    if cfg.cwAutoParry then
+        local ok,err=pcall(API.CombatWarriors.Step,now)
+        if not ok then set("cwAutoParry",false,true);notify("Auto Parry interrompido: erro de compatibilidade");warn("[CW] "..tostring(err)) end
+    end
     if hueElapsed>=0.15 then hueElapsed=0;if cfg.rainbow then refreshAccent() end end
 end)
 local renderBindingName="HussValleyPanelCamera_"..player.UserId
@@ -5806,6 +6140,7 @@ function API.Destroy()
     if not state.alive then return end
     state.alive=false;perfToken=perfToken+1;xrayToken=xrayToken+1
     if API.UI then API.UI.Stop() end
+    if API.CombatWarriors then API.CombatWarriors.Stop() end
     if API.InputMode then API.InputMode.Destroy() end
     if API.Loading then API.Loading.Stop() end
     if API.QuickActions then API.QuickActions.Stop() end
@@ -5842,6 +6177,7 @@ task.defer(function()
     end)
 end)
 return API
+
 
 
 
