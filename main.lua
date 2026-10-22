@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.22
+-- Huss Valley Panel 0.6.23
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -22,7 +22,7 @@ local defaults = {
     autoJumpButton=false, freezeButton=false, autoJumpInterval=0.15, freezeDuration=0.12, freezeCooldown=1,
     resizeJumpButton=false, jumpButtonScale=1.5,
     resizeShiftLock=false, shiftLockScale=1.5, selectedButtonScale=1,
-    mobilador=false, mobiladorShift=true, mobiladorShiftKey="V", mobiladorRightMode="Segurar", mobiladorRecoverKey="F8",
+    mobilador=false, pcInputMode=false, mobiladorShift=true, mobiladorShiftKey="V", mobiladorRightMode="Segurar", mobiladorRecoverKey="F8",
     mobiladorCustomCamera=false, mobiladorFixedSensitivity=false, mobiladorSensitivity=1,
     mobiladorReticle=true, mobiladorReticleSize=22,
     mobiladorManual=true, mobiladorDirectLook=true, mobiladorLookSpeed=1, mobiladorCursorScope="Sempre", mobiladorReticleStyle="Cruz", mobiladorReticleColor="Branco",
@@ -54,7 +54,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.22", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.23", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -395,6 +395,10 @@ set=function(key,value,quiet,keyContext)
         return false
     end
     if key=="unlockFPS" and newValue and type(setfpscap)~="function" and type(env.setfpscap)~="function" then notify("Esta versao do executor nao fornece setfpscap."); return false end
+    if key=="pcInputMode" and newValue and API.InputMode then
+        local available,reason=API.InputMode.CanEnable()
+        if not available then API.InputMode.Status(reason);notify(reason);return false end
+    end
     if cfg[key]==newValue then return true end
     cfg[key]=newValue
     for _,fn in ipairs(watchers[key] or {}) do fn(newValue) end
@@ -1016,6 +1020,20 @@ do
     slider(content,"Multiplicador do mouse","mobiladorSensitivity",0.1,3,0.05,"x")
     API.MobiladorStatus=text(content,"Status: desligado",9,{Size=UDim2.new(1,0,0,42),TextWrapped=true})
     actionButton(content,"Copiar diagnostico do mouse",function() if API.CopyMobiladorDiagnostics then API.CopyMobiladorDiagnostics() end end)
+end
+
+do
+    local content=card(right,"Compatibilidade de teclado / mouse","pcInputMode","Modo PC opcional para consultas de entrada dos scripts do jogo. Depois de ligar, feche o painel, mova o mouse e pressione uma tecla real do jogo.")
+    API.InputModeStatus=text(content,"Modo PC: desligado",9,{Size=UDim2.new(1,0,0,44),TextWrapped=true})
+    text(content,"Depende das APIs do executor. Uma escolha de controles guardada pelo jogo ao entrar pode exigir integracao propria; este modo nao recria essas acoes.",9,{Size=UDim2.new(1,0,0,44),TextWrapped=true})
+    actionButton(content,"Reaplicar modo PC",function()
+        if cfg.pcInputMode then set("pcInputMode",false,true) end
+        set("pcInputMode",true)
+    end)
+    actionButton(content,"Testar teclas e cliques (15s)",function() if API.InputMode then API.InputMode.BeginTest() end end)
+    actionButton(content,"Encerrar teste",function() if API.InputMode then API.InputMode.EndTest("manual") end end)
+    text(content,"O teste conta entradas fora de caixas de texto e recolhe o painel. Nao grava texto, nao envia comandos e nao copia nada automaticamente.",9,{Size=UDim2.new(1,0,0,44),TextWrapped=true})
+    actionButton(content,"Copiar diagnostico de entrada",function() if API.CopyInputModeDiagnostics then API.CopyInputModeDiagnostics() end end)
 end
 
 left,right=page("Shaders",6)
@@ -2615,6 +2633,249 @@ do
     end
 end
 -- End mobilador capture compatibility.
+
+-- Optional game-input detection compatibility; never produces input or restarts character controls.
+do
+    local I={active=false,connections={},retired={},queries={},lastPC=Enum.UserInputType.Keyboard}
+    API.InputMode=I
+    local propertyNames={KeyboardEnabled=true,MouseEnabled=true,TouchEnabled=true,PreferredInput=true}
+    local function capabilities()
+        return {getrawmetatable=getrawmetatable or env.getrawmetatable,isreadonly=isreadonly or env.isreadonly,
+            setreadonly=setreadonly or env.setreadonly,newcclosure=newcclosure or env.newcclosure,
+            checkcaller=checkcaller or env.checkcaller,getcallingscript=getcallingscript or env.getcallingscript,
+            getnamecallmethod=getnamecallmethod or env.getnamecallmethod}
+    end
+    function I.Status(message)
+        I.message=message
+        local label=API.InputModeStatus;local value="Modo PC: "..message
+        if label and label.Text~=value then label.Text=value end
+    end
+    function I.CanEnable()
+        if I.destroyed or not state.alive then return false,"painel encerrado" end
+        local a=capabilities()
+        for _,name in ipairs({"getrawmetatable","isreadonly","setreadonly","newcclosure","checkcaller","getcallingscript","getnamecallmethod"}) do
+            if type(a[name])~="function" then return false,"API indisponivel: "..name end
+        end
+        local ok,own=pcall(a.checkcaller)
+        if not ok or own~=true then return false,"origem do executor nao confirmada" end
+        local enumOK,preferred=pcall(function() return Enum.PreferredInput.KeyboardAndMouse end)
+        if not enumOK or not preferred then return false,"PreferredInput indisponivel neste cliente" end
+        return true
+    end
+    local function assign(b,key,value)
+        local a=b.apis
+        local ok,locked=pcall(a.isreadonly,b.mt);if not ok or type(locked)~="boolean" then return false end
+        if not pcall(a.setreadonly,b.mt,false) then return false end
+        local wrote=pcall(function() b.mt[key]=value;assert(b.mt[key]==value,"input shim readback") end)
+        local restored=pcall(a.setreadonly,b.mt,locked)
+        if not restored then restored=pcall(a.setreadonly,b.mt,locked) end
+        return wrote and restored
+    end
+    local function restore(b)
+        b.active=false
+        for _,key in ipairs({"__index","__namecall"}) do
+            if b.installed[key] and b.mt[key]==b.wrappers[key] and assign(b,key,b.previous[key]) then b.installed[key]=false end
+        end
+        return not b.installed.__index and not b.installed.__namecall
+    end
+    local function releaseRetired()
+        for index=#I.retired,1,-1 do
+            if restore(I.retired[index]) then table.remove(I.retired,index) end
+        end
+    end
+    function I.Sweep()
+        releaseRetired()
+        local slot=env.HussValleyTraceBridge
+        if type(slot)=="table" and slot.installed and slot.handler==nil and type(slot.release)=="function" then pcall(slot.release) end
+        releaseRetired()
+    end
+    function I.Detach()
+        I.active=false
+        local b=I.bridge;I.bridge=nil
+        if b and not restore(b) then I.retired[#I.retired+1]=b end
+        I.Sweep()
+    end
+    local function eligible(b)
+        if not b.active or I.destroyed or not state.alive then return false end
+        local ok,own=pcall(b.apis.checkcaller);if not ok or own~=false then return false end
+        local got,caller=pcall(b.apis.getcallingscript);if not got or not caller then return false end
+        -- Use property reads only here; no nested namecall changes the pending method name.
+        local valid,allowed=pcall(function()
+            local object=caller
+            for _=1,64 do
+                if object==b.core then return false end
+                if object==game then return true end
+                if not object then return false end
+                if object.Name=="PlayerModule" then
+                    local parent=object.Parent
+                    if parent and parent.Name=="PlayerScripts" and parent.Parent==player then return false end
+                end
+                object=object.Parent
+            end
+            return false
+        end)
+        return valid and allowed
+    end
+    local function normalizedLast(value)
+        if value==Enum.UserInputType.Touch then return I.lastPC end
+        return value
+    end
+    local function countQuery(key) I.queries[key]=(I.queries[key] or 0)+1 end
+    local function pcType(kind)
+        if kind==Enum.UserInputType.Keyboard or kind==Enum.UserInputType.MouseMovement then return true end
+        return kind and (kind.Name=="MouseButton1" or kind.Name=="MouseButton2" or kind.Name=="MouseButton3" or kind.Name=="MouseWheel")
+    end
+    function I.Configure(value)
+        I.Detach()
+        if not value then I.RefreshListeners();I.Status(I.failure or "desligado");return end
+        I.failure=nil
+        local available,reason=I.CanEnable()
+        if not available then I.failure=reason;I.Status(reason);error(reason) end
+        local a=capabilities();local got,mt=pcall(a.getrawmetatable,Input)
+        if not got or type(mt)~="table" or type(mt.__index)~="function" or type(mt.__namecall)~="function" then
+            I.failure="metatable de entrada indisponivel";I.Status(I.failure);error(I.failure)
+        end
+        local coreOK,core=pcall(game.GetService,game,"CoreGui")
+        if not coreOK or not core then I.failure="escopo nativo indisponivel";I.Status(I.failure);error(I.failure) end
+        local b={active=false,apis=a,mt=mt,core=core,previous={__index=mt.__index,__namecall=mt.__namecall},wrappers={},installed={}}
+        b.values={KeyboardEnabled=true,MouseEnabled=true,TouchEnabled=false,PreferredInput=Enum.PreferredInput.KeyboardAndMouse}
+        local lastOK,lastMethod=pcall(b.previous.__index,Input,"GetLastInputType")
+        if not lastOK or type(lastMethod)~="function" then I.failure="leitura nativa indisponivel";I.Status(I.failure);error(I.failure) end
+        local lastWrapper=function(self,...)
+            if self==Input and eligible(b) then countQuery("GetLastInputType");return normalizedLast(lastMethod(self,...)) end
+            return lastMethod(self,...)
+        end
+        local wrapped=pcall(function()
+            b.lastWrapper=a.newcclosure(lastWrapper)
+            b.wrappers.__index=a.newcclosure(function(self,key)
+                if self==Input and b.active and (propertyNames[key] or key=="GetLastInputType") and eligible(b) then
+                    if key=="GetLastInputType" then return b.lastWrapper end
+                    countQuery(key);return b.values[key]
+                end
+                return b.previous.__index(self,key)
+            end)
+            b.wrappers.__namecall=a.newcclosure(function(self,...)
+                if self==Input and b.active then
+                    local method=b.apis.getnamecallmethod()
+                    if method=="GetLastInputType" and eligible(b) then
+                        countQuery("GetLastInputType");return normalizedLast(b.previous.__namecall(self,...))
+                    end
+                end
+                return b.previous.__namecall(self,...)
+            end)
+            assert(type(b.lastWrapper)=="function" and type(b.wrappers.__index)=="function" and type(b.wrappers.__namecall)=="function","input closures")
+        end)
+        local function install(key)
+            local ok=assign(b,key,b.wrappers[key])
+            if b.mt[key]==b.wrappers[key] then b.installed[key]=true end
+            return ok
+        end
+        if not wrapped or not install("__index") or not install("__namecall") then
+            if not restore(b) then I.retired[#I.retired+1]=b end
+            I.failure="executor nao permitiu aplicar o modo PC";I.Status(I.failure);error(I.failure)
+        end
+        I.queries={};I.bridge=b;b.active=true;I.active=true;I.RefreshListeners()
+        I.Status("PC solicitado; use mouse e teclado reais fora do painel")
+    end
+    function I.EndTest(reason)
+        local test=I.test;if not test or not test.active then return false end
+        test.active=false;test.endedAt=os.clock();test.reason=reason or "manual"
+        if I.testTimer and type(task.cancel)=="function" then pcall(task.cancel,I.testTimer) end;I.testTimer=nil
+        I.RefreshListeners()
+        I.Status("teste encerrado: "..test.keyboard.." teclas / "..test.mouse.." cliques; copie o diagnostico")
+        return true
+    end
+    function I.CheckExpiry()
+        local test=I.test
+        if test and test.active and os.clock()>=test.expiresAt then I.EndTest("tempo") end
+    end
+    function I.Observe(input,processed,phase)
+        if I.destroyed or not state.alive then return end
+        I.CheckExpiry()
+        local kind=input.UserInputType
+        if pcType(kind) and phase~="Ended" then I.lastPC=kind end
+        local test=I.test
+        if not test or not test.active or state.booting or state.visible then return end
+        if Input:GetFocusedTextBox() then test.ignoredText=true;return end
+        if phase=="Changed" then
+            if kind==Enum.UserInputType.MouseMovement then
+                test.moves=test.moves+1
+                local delta=input.Delta
+                if delta and (delta.X~=0 or delta.Y~=0) then test.movingSamples=test.movingSamples+1 end
+            elseif kind and kind.Name=="MouseWheel" then test.wheels=test.wheels+1 end
+            return
+        end
+        if kind==Enum.UserInputType.Keyboard then
+            local name=input.KeyCode.Name
+            local record=test.keys[name]
+            if not record then
+                if test.keyKinds>=32 then test.truncated=true;return end
+                record={began=0,ended=0,processed=0};test.keys[name]=record;test.keyKinds=test.keyKinds+1
+            end
+            if phase=="Began" then
+                test.keyboard=test.keyboard+1;record.began=record.began+1
+                if processed then record.processed=record.processed+1 end
+            else record.ended=record.ended+1 end
+        elseif pcType(kind) and kind~=Enum.UserInputType.MouseMovement then
+            local name=kind.Name;local record=test.buttons[name]
+            if not record then record={began=0,ended=0,processed=0};test.buttons[name]=record end
+            if phase=="Began" then test.mouse=test.mouse+1;record.began=record.began+1;if processed then record.processed=record.processed+1 end
+            else record.ended=record.ended+1 end
+        elseif phase=="Began" then test.other=test.other+1 end
+    end
+    function I.RefreshListeners()
+        if I.active or I.test and I.test.active then
+            if #I.connections>0 then return end
+            I.connections={Input.InputBegan:Connect(function(input,processed) I.Observe(input,processed,"Began") end),
+                Input.InputEnded:Connect(function(input,processed) I.Observe(input,processed,"Ended") end),
+                Input.InputChanged:Connect(function(input,processed) I.Observe(input,processed,"Changed") end)}
+        else
+            for _,connection in ipairs(I.connections) do connection:Disconnect() end;I.connections={}
+        end
+    end
+    function I.BeginTest()
+        if I.destroyed or not state.alive or state.booting then return false end
+        I.EndTest("reiniciado")
+        local now=os.clock()
+        local test={active=true,startedAt=now,expiresAt=now+15,keyboard=0,mouse=0,moves=0,movingSamples=0,wheels=0,other=0,keyKinds=0,keys={},buttons={}}
+        I.test=test;I.RefreshListeners()
+        I.testTimer=task.delay(15,function() if I.test==test and test.active then I.testTimer=nil;I.EndTest("tempo") end end)
+        I.Status("teste de 15s; tente as teclas e cliques que nao funcionam")
+        show(false);return true
+    end
+    function I.Snapshot()
+        I.CheckExpiry()
+        local raw={}
+        for _,key in ipairs({"KeyboardEnabled","MouseEnabled","TouchEnabled","PreferredInput"}) do
+            local ok,value=pcall(function() return Input[key] end)
+            if ok then
+                if type(value)=="boolean" then raw[key]=value else raw[key]=value and value.Name or "unknown" end
+            end
+        end
+        local got,last=pcall(Input.GetLastInputType,Input);raw.lastInput=got and last and last.Name or "unknown"
+        local available,reason=I.CanEnable();local queries={};for key,value in pairs(I.queries) do queries[key]=value end
+        local test=I.test;local result
+        if test then
+            result={active=test.active,seconds=math.max(0,(test.endedAt or os.clock())-test.startedAt),reason=test.reason,
+                keyboard=test.keyboard,mouse=test.mouse,moves=test.moves,movingSamples=test.movingSamples,wheels=test.wheels,other=test.other,
+                ignoredText=test.ignoredText==true,truncated=test.truncated==true,keys={},buttons={}}
+            for name,record in pairs(test.keys) do result.keys[name]={began=record.began,ended=record.ended,processed=record.processed} end
+            for name,record in pairs(test.buttons) do result.buttons[name]={began=record.began,ended=record.ended,processed=record.processed} end
+        end
+        return {kind="InputModeDiagnostics",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,requested=cfg.pcInputMode,
+            active=I.active,available=available,unavailableReason=not available and reason or nil,message=I.message,
+            nativeReadings=raw,requestedReadings=I.active and {KeyboardEnabled=true,MouseEnabled=true,TouchEnabled=false,PreferredInput="KeyboardAndMouse"} or nil,
+            queriesServed=queries,lastPhysicalPCType=I.lastPC.Name,scope="game scripts; executor/CoreGui/PlayerModule excluded",test=result,
+            inactiveHookLeases=#I.retired,
+            limitation="Does not create bindings, replay input or change decisions already cached by the game."}
+    end
+    function I.Destroy()
+        I.destroyed=true;I.EndTest("painel encerrado");I.Detach();I.RefreshListeners()
+        for _,connection in ipairs(I.connections) do connection:Disconnect() end;I.connections={}
+    end
+    actions.pcInputMode=I.Configure
+end
+-- End game-input detection compatibility.
 
 -- Visual performance changes are cancellable, batched, and reversible.
 local perfToken,perfQueued,perfCache=0,false,nil
@@ -4600,6 +4861,9 @@ end
 function API.CopyMobiladorDiagnostics()
     return presentDiagnostic(Http:JSONEncode(API.Mobilador.Snapshot()),"Diagnostico do mobilador copiado.")
 end
+function API.CopyInputModeDiagnostics()
+    return presentDiagnostic(Http:JSONEncode(API.InputMode.Snapshot()),"Diagnostico de entrada copiado.")
+end
 function API.CopyLockDiagnostics()
     local k=API.LockOn;local cam=workspace.CurrentCamera
     local report={kind="LockOnRelease",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
@@ -4895,6 +5159,7 @@ endHitTrace=function(reason,copy)
     if not ctx then return false end
     ctx.active=false;hitTrace.current=nil
     if ctx.detachOutbound then ctx.report.outboundCleanup=ctx.detachOutbound();ctx.detachOutbound=nil end
+    if API.InputMode then API.InputMode.Sweep() end
     for _,connection in ipairs(ctx.connections) do connection:Disconnect() end
     for _,connection in ipairs(ctx.characterConnections) do connection:Disconnect() end
     ctx.report.duration=math.floor((os.clock()-ctx.started)*1000+0.5)/1000
@@ -4990,6 +5255,7 @@ local function observeOutbound(ctx,capture)
         end
         return "inactivePassThrough"
     end
+    slot.release=ctx.detachOutbound
     return slot.metatable.__namecall==slot.wrapper and "installed" or "chainReused"
 end
 function API.MarkDiagnostics(label)
@@ -5328,6 +5594,7 @@ function API.Destroy()
     if not state.alive then return end
     state.alive=false;perfToken=perfToken+1;xrayToken=xrayToken+1
     if API.UI then API.UI.Stop() end
+    if API.InputMode then API.InputMode.Destroy() end
     if API.Loading then API.Loading.Stop() end
     if API.QuickActions then API.QuickActions.Stop() end
     if API.TouchControls then API.TouchControls.Destroy() end
@@ -5363,6 +5630,7 @@ task.defer(function()
     end)
 end)
 return API
+
 
 
 

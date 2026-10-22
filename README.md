@@ -1,6 +1,20 @@
 # Huss Valley Panel
 
-Versão 0.6.22 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.23 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Compatibilidade de teclado e mouse na versão 0.6.23
+
+Em **World → Compatibilidade de teclado / mouse**, há um **Modo PC opcional**, desligado por padrão e independente da captura por V. Depois de ligar, feche o painel, mova o mouse e pressione uma tecla real usada pelo jogo. **Reaplicar modo PC** desliga e tenta aplicar novamente. Se faltar uma API necessária do executor, a opção permanece desligada e mostra o motivo; o teste de entrada continua disponível.
+
+O modo atende consultas de detecção feitas pelos scripts do jogo: `KeyboardEnabled=true`, `MouseEnabled=true`, `TouchEnabled=false` e `PreferredInput=KeyboardAndMouse`. Consultas a `GetLastInputType` que retornariam Touch usam o último tipo real de teclado/mouse observado; resultados nativos de mouse, teclado e gamepad são preservados. Não há atribuição às propriedades de detecção, que são somente leitura. O executor, CoreGui e o PlayerModule nativo ficam fora da substituição; uma origem desconhecida recebe a leitura original. Referências: [UserInputService](https://create.roblox.com/docs/reference/engine/classes/UserInputService) e [InputAction.PreferredBinding](https://create.roblox.com/docs/reference/engine/classes/InputAction#PreferredBinding).
+
+Isso pode ajudar jogos que continuam consultando essas propriedades. Não muda a seleção de bindings feita internamente pelo motor, uma função nativa já guardada pelo jogo nem uma decisão de controles tomada antes da ativação. Não foi inspecionado o código do jogo de arremessar pessoas/objetos, e não há garantia de que ele reconfigure suas ações. O modo não cria atalhos de pegar/agachar, não envia cliques, teclas ou remotes e não reinicia controles do personagem. A câmera, Shift, V e o cursor mantêm a implementação anterior.
+
+**Testar teclas e cliques (15s)** recolhe o painel e conta os eventos recebidos fora de caixas de texto: teclas por nome e fase, cliques, entradas processadas, movimento e roda. Não guarda texto digitado nem uma sequência de teclas, limita o número de teclas distintas e encerra a coleta automaticamente. **Copiar diagnóstico de entrada** exporta somente quando solicitado. O relatório distingue as leituras nativas, as consultas atendidas pelo modo e os eventos recebidos; contar um evento não confirma que uma ação do jogo o aceitou.
+
+O modo usa hooks reversíveis apenas quando o executor oferece todas as APIs exigidas. Desligar e encerrar o painel removem seus listeners; hooks posteriores de terceiros são preservados e os wrappers que ainda estejam encadeados ficam transparentes. O gravador existente do painel e o novo modo coordenam a limpeza em ambas as ordens de instalação. Não foi criado outro loop de renderização.
+
+Validação: compilação no Luau oficial e **18 casos simulados, com 227 asserções**, incluindo leituras inconsistentes, escopo de chamadas, falhas das APIs, rollback, readonly, hooks encadeados, gravador real do painel, limpeza e teste limitado a 15 segundos. Passaram também as **709 asserções** existentes de câmera/ações nativas/FPS e **412** de editor de botões/propriedades. Os módulos anteriores de captura/cursor, Lock On, ESP, ações, gráficos e botões foram comparados sem alterações. O reconhecimento no Roblox/Delta precisa ser conferido no aparelho.
 
 ## Resposta do cursor personalizado na versão 0.6.22
 
@@ -570,6 +584,7 @@ As opções começam desligadas. O ESP possui frequência de dados e distância 
 - [Animação de interface](https://create.roblox.com/docs/ui/animation)
 
 Referências de entrada utilizadas na integração: [getconnections](https://docs.sunc.io/Signals/getconnections/), [firesignal](https://docs.sunc.io/Signals/firesignal/) e [VirtualInputManager](https://create.roblox.com/docs/reference/engine/classes/VirtualInputManager). A disponibilidade efetiva no Delta é conferida em execução.
+
 
 
 
