@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.23
+-- Huss Valley Panel 0.6.24
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -54,7 +54,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.23", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.24", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -1032,7 +1032,7 @@ do
     end)
     actionButton(content,"Testar teclas e cliques (15s)",function() if API.InputMode then API.InputMode.BeginTest() end end)
     actionButton(content,"Encerrar teste",function() if API.InputMode then API.InputMode.EndTest("manual") end end)
-    text(content,"O teste conta entradas fora de caixas de texto e recolhe o painel. Nao grava texto, nao envia comandos e nao copia nada automaticamente.",9,{Size=UDim2.new(1,0,0,44),TextWrapped=true})
+    text(content,"No teste, segure o esquerdo sobre um objeto e tente sentar com Shift. Registra estados, eventos Mouse e acoes vinculadas; nao grava texto nem envia comandos.",9,{Size=UDim2.new(1,0,0,44),TextWrapped=true})
     actionButton(content,"Copiar diagnostico de entrada",function() if API.CopyInputModeDiagnostics then API.CopyInputModeDiagnostics() end end)
 end
 
@@ -2634,6 +2634,195 @@ do
 end
 -- End mobilador capture compatibility.
 
+-- Explicit input-route diagnostics: observe native state and bindings without dispatching actions.
+do
+    local R={connections={}}
+    API.InputRoutes=R
+    local watched={MouseButton1=true,LeftShift=true,RightShift=true}
+    local relevant={MouseButton1=true,MouseButton2=true,LeftShift=true,RightShift=true,Keyboard=true}
+    local function enum(value)
+        local ok,name=pcall(function() return value.Name end)
+        return ok and type(name)=="string" and name or "unknown"
+    end
+    local function finite(value) return type(value)=="number" and value==value and math.abs(value)<math.huge end
+    -- Also used from the detection shim: property reads only, never a nested namecall.
+    function R.Path(object)
+        if not object then return "none" end
+        local ok,path=pcall(function()
+            local names={}
+            for _=1,32 do
+                if not object or object==game then break end
+                table.insert(names,1,string.sub(object.Name,1,48));object=object.Parent
+            end
+            return string.sub(table.concat(names,"."),1,240)
+        end)
+        return ok and path or "unavailable"
+    end
+    local function clone(value)
+        if type(value)~="table" then return value end
+        local result={};for key,item in pairs(value) do result[key]=clone(item) end;return result
+    end
+    local function context()
+        local m=API.Mobilador;local cam=workspace.CurrentCamera
+        return {panelVisible=state.visible==true,mouseBehavior=enum(Input.MouseBehavior),cameraType=cam and enum(cam.CameraType) or "none",
+            captureEnabled=cfg.mobilador,captureRequested=m and m.shift==true or false,captureRunning=m and m.running==true or false,
+            panelLeftDown=m and m.leftDown==true or false,menuKey=cfg.toggleKey,lockKey=cfg.lockKey,
+            captureKey=cfg.mobiladorShiftKey,recoverKey=cfg.mobiladorRecoverKey,nativeShiftReserved=true}
+    end
+    function R.Bindings()
+        local ok,info=pcall(function() return game:GetService("ContextActionService"):GetAllBoundActionInfo() end)
+        local result={available=ok and type(info)=="table",actions={},scanned=0,truncated=false}
+        if not result.available then return result end
+        for name,row in pairs(info) do
+            if result.scanned>=256 then result.truncated=true;break end
+            result.scanned=result.scanned+1
+            if type(name)=="string" and type(row)=="table" and type(row.inputTypes)=="table" then
+                local inputs,matched={},false
+                for index,value in ipairs(row.inputTypes) do
+                    if index>16 then result.truncated=true;break end
+                    local input=enum(value);inputs[#inputs+1]=input;if relevant[input] then matched=true end
+                end
+                if matched then
+                    if #result.actions>=32 then result.truncated=true;break end
+                    result.actions[#result.actions+1]={name=string.sub(name,1,120),inputs=inputs,
+                        priority=finite(row.priorityLevel) and row.priorityLevel or nil,
+                        stackOrder=finite(row.stackOrder) and row.stackOrder or nil,touchButton=row.createTouchButton==true}
+                end
+            end
+        end
+        table.sort(result.actions,function(a,b) return a.name<b.name end)
+        return result
+    end
+    function R.Listeners(mouse)
+        local inspect=getconnections or env.getconnections;local environment=getfenv or env.getfenv
+        local result={available=type(inspect)=="function",signals={}}
+        if not result.available then return result end
+        local signals={{"InputBegan",Input.InputBegan},{"InputEnded",Input.InputEnded}}
+        if mouse then
+            pcall(function() signals[#signals+1]={"Mouse.Button1Down",mouse.Button1Down};signals[#signals+1]={"Mouse.Button1Up",mouse.Button1Up} end)
+        end
+        for _,entry in ipairs(signals) do
+            local ok,list=pcall(inspect,entry[2]);local row={signal=entry[1],available=ok and type(list)=="table",scanned=0,disabled=0,unknown=0,sources={}}
+            result.signals[#result.signals+1]=row
+            if row.available then
+                local seen={}
+                for _,connection in pairs(list) do
+                    if row.scanned>=64 then row.truncated=true;break end
+                    row.scanned=row.scanned+1
+                    local got,enabled,fn=pcall(function() return connection.Enabled,connection.Function end)
+                    if got and enabled==false then row.disabled=row.disabled+1 end
+                    local path="unavailable"
+                    if got and type(fn)=="function" and type(environment)=="function" then
+                        local found,scriptObject=pcall(function() return environment(fn).script end)
+                        if found and scriptObject then path=R.Path(scriptObject) end
+                    end
+                    if path=="unavailable" or path=="none" or path=="" then row.unknown=row.unknown+1
+                    elseif not seen[path] then
+                        seen[path]=true
+                        if #row.sources<8 then row.sources[#row.sources+1]=path else row.truncated=true end
+                    end
+                end
+                table.sort(row.sources)
+            end
+        end
+        return result
+    end
+    local function nativeDown(name)
+        if name=="MouseButton1" then return Input:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) end
+        return Input:IsKeyDown(Enum.KeyCode[name])
+    end
+    local function sample(record,name,phase)
+        local ok,value=pcall(nativeDown,name)
+        if not ok or type(value)~="boolean" then record.readback.unavailable=record.readback.unavailable+1;return end
+        local key=phase..(value and "Down" or "Up")
+        record.readback[key]=(record.readback[key] or 0)+1
+    end
+    function R.MouseSample()
+        local mouse=R.mouse;if not mouse then return {available=false} end
+        local result={available=true}
+        pcall(function() result.target=R.Path(mouse.Target);result.filter=R.Path(mouse.TargetFilter) end)
+        pcall(function()
+            if finite(mouse.X) and finite(mouse.Y) then result.position={x=mouse.X,y=mouse.Y} end
+            local position=mouse.Hit.Position
+            if finite(position.X) and finite(position.Y) and finite(position.Z) then result.hit={x=position.X,y=position.Y,z=position.Z} end
+        end)
+        return result
+    end
+    local function collecting()
+        local test=R.test
+        return not R.destroyed and state.alive and test and test.active and os.clock()<test.expiresAt
+            and not state.booting and not state.visible and not Input:GetFocusedTextBox()
+    end
+    function R.Query(key,caller,normalized)
+        local test=R.test;if not test or not test.active or R.destroyed or not state.alive or os.clock()>=test.expiresAt then return end
+        local data=test.routes;local row=R.callers[caller]
+        if not row then
+            if #data.queryCallers>=16 then data.callersTruncated=true;return end
+            row={script=R.Path(caller),queries={},touchLastNormalized=0};R.callers[caller]=row;data.queryCallers[#data.queryCallers+1]=row
+        end
+        row.queries[key]=(row.queries[key] or 0)+1
+        if normalized then row.touchLastNormalized=row.touchLastNormalized+1 end
+    end
+    function R.Observe(input,processed,phase)
+        if not collecting() then return end
+        local kind=input.UserInputType
+        if phase=="Changed" then
+            if kind==Enum.UserInputType.MouseMovement then
+                for name in pairs(R.held) do sample(R.test.routes.states[name],name,"held") end
+            end
+            return
+        end
+        local name=kind==Enum.UserInputType.Keyboard and enum(input.KeyCode) or enum(kind)
+        if not watched[name] then return end
+        local record=R.test.routes.states[name];sample(record,name,phase=="Began" and "began" or "ended")
+        if phase=="Began" then
+            record.began=record.began+1;if processed then record.processed=record.processed+1 end
+            if not R.held[name] then R.held[name]=os.clock() end
+            if name=="MouseButton1" then R.test.routes.mouseAtPress=R.MouseSample() end
+        else
+            record.ended=record.ended+1
+            if R.held[name] then record.maxHeldSeconds=math.max(record.maxHeldSeconds,os.clock()-R.held[name]);R.held[name]=nil end
+        end
+    end
+    function R.End(test)
+        if R.test~=test then return end
+        for _,connection in ipairs(R.connections) do connection:Disconnect() end;R.connections={}
+        local held=R.held or {};R.test=nil;R.mouse=nil;R.held={};R.callers={}
+        if not test.routes then return end
+        for name,started in pairs(held) do
+            local row=test.routes.states[name];row.heldAtEnd=true;row.maxHeldSeconds=math.max(row.maxHeldSeconds,os.clock()-started)
+        end
+        test.routes.bindingsEnd=R.Bindings();test.routes.contextEnd=context()
+    end
+    function R.Begin(test)
+        if R.destroyed then return end
+        if R.test then R.End(R.test) end
+        R.test=test;R.held={};R.callers={}
+        local data={states={},queryCallers={},legacyMouse={available=false,began=0,ended=0},contextStart=context(),bindingsStart=R.Bindings()}
+        test.routes=data
+        for name in pairs(watched) do data.states[name]={began=0,ended=0,processed=0,maxHeldSeconds=0,readback={unavailable=0}} end
+        local got,mouse=pcall(player.GetMouse,player)
+        if got and mouse then
+            R.mouse=mouse
+            for _,event in ipairs({{"Button1Down","began"},{"Button1Up","ended"}}) do
+                local ok,connection=pcall(function() return mouse[event[1]]:Connect(function()
+                    if collecting() then data.legacyMouse[event[2]]=data.legacyMouse[event[2]]+1 end
+                end) end)
+                if ok and connection then R.connections[#R.connections+1]=connection end
+            end
+            data.legacyMouse.available=#R.connections==2
+        end
+        data.listeners=R.Listeners(R.mouse)
+        data.meaning="Observed bindings and events do not prove a callback ran or an action succeeded. Readbacks are sampled during input callbacks."
+    end
+    function R.Export(test) return test and test.routes and clone(test.routes) or nil end
+    function R.Destroy()
+        if R.test then pcall(R.End,R.test) end
+        for _,connection in ipairs(R.connections) do connection:Disconnect() end;R.connections={};R.destroyed=true
+    end
+end
+-- End explicit input-route diagnostics.
+
 -- Optional game-input detection compatibility; never produces input or restarts character controls.
 do
     local I={active=false,connections={},retired={},queries={},lastPC=Enum.UserInputType.Keyboard}
@@ -2714,13 +2903,16 @@ do
             end
             return false
         end)
-        return valid and allowed
+        return valid and allowed,valid and allowed and caller or nil
     end
     local function normalizedLast(value)
         if value==Enum.UserInputType.Touch then return I.lastPC end
         return value
     end
-    local function countQuery(key) I.queries[key]=(I.queries[key] or 0)+1 end
+    local function countQuery(key,caller,normalized)
+        I.queries[key]=(I.queries[key] or 0)+1
+        if API.InputRoutes and API.InputRoutes.test then pcall(API.InputRoutes.Query,key,caller,normalized) end
+    end
     local function pcType(kind)
         if kind==Enum.UserInputType.Keyboard or kind==Enum.UserInputType.MouseMovement then return true end
         return kind and (kind.Name=="MouseButton1" or kind.Name=="MouseButton2" or kind.Name=="MouseButton3" or kind.Name=="MouseWheel")
@@ -2742,23 +2934,30 @@ do
         local lastOK,lastMethod=pcall(b.previous.__index,Input,"GetLastInputType")
         if not lastOK or type(lastMethod)~="function" then I.failure="leitura nativa indisponivel";I.Status(I.failure);error(I.failure) end
         local lastWrapper=function(self,...)
-            if self==Input and eligible(b) then countQuery("GetLastInputType");return normalizedLast(lastMethod(self,...)) end
+            if self==Input then
+                local allowed,caller=eligible(b)
+                if allowed then local value=lastMethod(self,...);countQuery("GetLastInputType",caller,value==Enum.UserInputType.Touch);return normalizedLast(value) end
+            end
             return lastMethod(self,...)
         end
         local wrapped=pcall(function()
             b.lastWrapper=a.newcclosure(lastWrapper)
             b.wrappers.__index=a.newcclosure(function(self,key)
-                if self==Input and b.active and (propertyNames[key] or key=="GetLastInputType") and eligible(b) then
-                    if key=="GetLastInputType" then return b.lastWrapper end
-                    countQuery(key);return b.values[key]
+                if self==Input and b.active and (propertyNames[key] or key=="GetLastInputType") then
+                    local allowed,caller=eligible(b)
+                    if allowed then
+                        if key=="GetLastInputType" then return b.lastWrapper end
+                        countQuery(key,caller);return b.values[key]
+                    end
                 end
                 return b.previous.__index(self,key)
             end)
             b.wrappers.__namecall=a.newcclosure(function(self,...)
                 if self==Input and b.active then
                     local method=b.apis.getnamecallmethod()
-                    if method=="GetLastInputType" and eligible(b) then
-                        countQuery("GetLastInputType");return normalizedLast(b.previous.__namecall(self,...))
+                    if method=="GetLastInputType" then
+                        local allowed,caller=eligible(b)
+                        if allowed then local value=b.previous.__namecall(self,...);countQuery("GetLastInputType",caller,value==Enum.UserInputType.Touch);return normalizedLast(value) end
                     end
                 end
                 return b.previous.__namecall(self,...)
@@ -2780,6 +2979,10 @@ do
     function I.EndTest(reason)
         local test=I.test;if not test or not test.active then return false end
         test.active=false;test.endedAt=os.clock();test.reason=reason or "manual"
+        if API.InputRoutes then
+            local ok=pcall(API.InputRoutes.End,test)
+            if not ok then test.routeError="leitura final de rotas indisponivel" end
+        end
         if I.testTimer and type(task.cancel)=="function" then pcall(task.cancel,I.testTimer) end;I.testTimer=nil
         I.RefreshListeners()
         I.Status("teste encerrado: "..test.keyboard.." teclas / "..test.mouse.." cliques; copie o diagnostico")
@@ -2797,6 +3000,7 @@ do
         local test=I.test
         if not test or not test.active or state.booting or state.visible then return end
         if Input:GetFocusedTextBox() then test.ignoredText=true;return end
+        if API.InputRoutes then pcall(API.InputRoutes.Observe,input,processed,phase) end
         if phase=="Changed" then
             if kind==Enum.UserInputType.MouseMovement then
                 test.moves=test.moves+1
@@ -2841,7 +3045,12 @@ do
         I.test=test;I.RefreshListeners()
         I.testTimer=task.delay(15,function() if I.test==test and test.active then I.testTimer=nil;I.EndTest("tempo") end end)
         I.Status("teste de 15s; tente as teclas e cliques que nao funcionam")
-        show(false);return true
+        show(false)
+        if API.InputRoutes then
+            local ok=pcall(API.InputRoutes.Begin,test)
+            if not ok then pcall(API.InputRoutes.End,test);test.routeError="coleta de rotas indisponivel" end
+        end
+        return true
     end
     function I.Snapshot()
         I.CheckExpiry()
@@ -2861,6 +3070,8 @@ do
                 ignoredText=test.ignoredText==true,truncated=test.truncated==true,keys={},buttons={}}
             for name,record in pairs(test.keys) do result.keys[name]={began=record.began,ended=record.ended,processed=record.processed} end
             for name,record in pairs(test.buttons) do result.buttons[name]={began=record.began,ended=record.ended,processed=record.processed} end
+            if API.InputRoutes then local ok,data=pcall(API.InputRoutes.Export,test);if ok then result.routes=data end end
+            result.routeError=test.routeError
         end
         return {kind="InputModeDiagnostics",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,requested=cfg.pcInputMode,
             active=I.active,available=available,unavailableReason=not available and reason or nil,message=I.message,
@@ -2871,6 +3082,7 @@ do
     end
     function I.Destroy()
         I.destroyed=true;I.EndTest("painel encerrado");I.Detach();I.RefreshListeners()
+        if API.InputRoutes then pcall(API.InputRoutes.Destroy) end
         for _,connection in ipairs(I.connections) do connection:Disconnect() end;I.connections={}
     end
     actions.pcInputMode=I.Configure

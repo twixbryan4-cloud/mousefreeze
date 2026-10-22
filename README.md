@@ -1,6 +1,24 @@
 # Huss Valley Panel
 
-Versão 0.6.23 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.24 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Diagnóstico de segurar com o mouse e sentar com Shift na versão 0.6.24
+
+O relatório da v0.6.23 foi capturado durante a falha no place 6961824067 / universe 2668101271: as leituras nativas já indicavam teclado e mouse ativos, com preferência KeyboardAndMouse. Chegaram 63 pressionamentos e 35 cliques; LeftShift apareceu 17 vezes sem processed, e 32 cliques também vieram sem essa marca. E foi processado nas seis tentativas, mas esse dado sozinho não explica a falha dos outros comandos. O relatório registrou 419 consultas GetLastInputType; esse contador não comprova que o resultado precisou ser alterado nem que a lógica de pegar/sentar executou.
+
+Use o mesmo loader e confira **v0.6.24**. Em **World → Compatibilidade de teclado / mouse → Testar teclas e cliques (15s)**, segure o esquerdo sobre um objeto por um ou dois segundos, solte e tente sentar com Shift. Depois use **Copiar diagnóstico de entrada**. O teste continua disponível com Modo PC desligado ou sem APIs de hook; as evidências opcionais indicam quando não estão disponíveis. Esta versão amplia a investigação; a correção da causa no jogo permanece pendente de evidência de execução no aparelho.
+
+O novo campo `test.routes` acrescenta:
+
+- Estados nativos de MouseButton1, LeftShift e RightShift durante os callbacks de pressionar, soltar e movimentar o mouse enquanto uma dessas entradas está segurada; duração máxima observada de cada pressão e indicação de pressão ainda aberta ao terminar. Uma leitura durante o callback é uma amostra naquele momento, e não prova isolada de defeito no motor.
+- Contadores independentes dos eventos reais Mouse.Button1Down e Button1Up, além do alvo, filtro e posição do Mouse no último clique. Isso permite comparar os dois caminhos de entrada. O diagnóstico não reproduz callbacks nem cria eventos ausentes. Referência: [Mouse](https://create.roblox.com/docs/reference/engine/classes/Mouse).
+- Metadados das ações ContextActionService vinculadas ao esquerdo, direito, Shift ou Keyboard, no começo e no fim do teste: nome, entradas, prioridade, ordem e pedido de botão de toque. A lista é limitada e ordenada; uma lista vazia não exclui controles implementados com outros sistemas. A presença de duas ações na mesma tecla também não confirma um conflito. Referência: [ContextActionService.GetAllBoundActionInfo](https://create.roblox.com/docs/reference/engine/classes/ContextActionService#GetAllBoundActionInfo).
+- Origens de listeners, se getconnections e os ambientes das funções estiverem acessíveis: até 64 conexões por sinal e oito caminhos de script por sinal. As funções conectadas são apenas inspecionadas, sem execução, desativação ou substituição. Origens inacessíveis ficam marcadas como desconhecidas.
+- Até 16 scripts responsáveis pelas consultas atendidas pelo Modo PC durante o teste. O contador touchLastNormalized separa resultados Touch realmente normalizados de consultas GetLastInputType cujo resultado nativo foi preservado. O caminho do script usa apenas leituras de propriedades para preservar o método pendente nos hooks de namecall.
+
+As leituras registram também as teclas configuradas do painel e o estado de captura, para comparar os dados com V/Shift. A coleta evita caixas de texto e o painel aberto, mantém os limites de 15 segundos e exporta somente por solicitação. Não há loop adicional por quadro nem varredura contínua de bindings/listeners. Os dois observadores de Mouse existem apenas durante o teste e são removidos ao encerrar, reiniciar ou destruir o painel. A câmera, o cursor e o tratamento normal de Shift/V conservam o código da v0.6.23.
+
+Validação: compilação no Luau oficial; **14 casos novos com 90 asserções**, mais os **18 casos / 227 asserções** da compatibilidade anterior. Foram testados evento UIS sem evento Mouse, duração de segurar, leitura nativa divergente, mudanças de bindings, origens de scripts, ausência de APIs, falhas, limites e limpeza. Passaram também as **709 asserções** existentes de câmera/ações nativas/FPS e **412** de editor de botões/propriedades. Os testes são simulados; o diagnóstico atualizado ainda precisa ser executado durante a falha no Roblox/Delta.
 
 ## Compatibilidade de teclado e mouse na versão 0.6.23
 
