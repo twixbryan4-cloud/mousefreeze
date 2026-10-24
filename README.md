@@ -2,6 +2,29 @@
 
 Versão 0.6.31 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
 
+## Teste comparativo separado de vídeo
+
+O teste real da v0.6.31 em WebM 720p também terminou sem carregamento, após 12,11 s: cache de 13.920.283 bytes encontrado, resolução/duração nativas zeradas e erro `Failed to load` do arquivo local. O último estado anterior à limpeza tinha player e host visíveis. Isso confirma a falha desse caminho no teste recebido; não identifica sozinho o componente responsável nem comprova que todo vídeo local seja incompatível com a versão do Delta.
+
+Foi acrescentado `video-support-test.lua`, independente do painel, executado somente quando solicitado:
+
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/main/video-support-test.lua"))()
+```
+
+Com o painel aberto, execute o teste e aguarde o resultado dos dois vídeos, em até 30 segundos. Use **Copiar resultado na janela do teste**, não o diagnóstico antigo do painel. O script mantém os ajustes do painel e usa uma interface separada, no mesmo parent do ScreenGui do painel quando disponível; usa PlayerGui como alternativa. Reexecutar ou fechar limpa os recursos anteriores do próprio teste.
+
+Os controles sequenciais usam a mesma configuração de player nativo visível, sem som:
+
+- Asset público `5608384572`, citado no [exemplo oficial de VideoFrame](https://create.roblox.com/docs/ui/video-frames). Acesso/rede/permissões ainda podem fazê-lo falhar no contexto testado; falha não comprova falta de suporte geral do cliente.
+- Arquivo local gerado para diagnóstico: VP8/yuv420p, 96×64, 12 FPS, 12 quadros, um segundo, sem áudio e 14.267 bytes. Bytes embutidos no script, escrita local e comparação de readback quando disponível, sem download desse controle. SHA-256: `2f1edb938a270c407814615cf2609731ebbcb30ead72d46e71a06f195de6be04`.
+
+Cada etapa tem prazo total de 15 segundos, incluindo preparação; resultados atrasados são descartados. `verified=true` exige IsLoaded e avanço de TimePosition. Playing e sucesso do ContentProvider não bastam. Erros nativos são restritos à fonte atual, mascarados e limitados. O resultado inclui nome/versão do executor e versão Roblox quando as APIs informam esses dados, sem capturar identificação do jogador ou entradas pessoais. Copiar depende de ação do usuário; há texto selecionável se clipboard não estiver disponível.
+
+Se somente o asset Roblox tocar, a diferença fica isolada ao caminho do arquivo local desse controle; isso não demonstra por si só a causa interna do Delta. Se ambos falharem, o resultado é **inconclusivo**, incluindo possíveis limitações de acesso ao asset, contexto de UI, rede ou cliente. Se o controle local tocar, o vídeo original continua precisando de investigação específica.
+
+Validação: sintaxe do script completo e nove casos simulados sobre progresso real, timeout, APIs ausentes, cancelamento, readback incorreto, resultados atrasados, isolamento de logs e limpeza. Os bytes embutidos foram reconstruídos e decodificados integralmente com FFmpeg. O `main.lua` da v0.6.31 não foi modificado por esta publicação. O teste no Delta ainda depende da execução no aparelho.
+
 ## Compatibilidade e diagnóstico do vídeo na versão 0.6.31
 
 O teste real da v0.6.30 em WebM HQ terminou com 49 verificações, `loaded=false`, `timeLength=0` e `timePosition=0`. O cache tinha o tamanho esperado de 41.448.021 bytes. A visibilidade falsa do host/player no relatório é consequência da limpeza após o timeout; o estado anterior preservava `playing=true`, que não comprova reprodução. O relatório anterior do Original foi copiado com apenas 0,4 segundo e não confirma o resultado final desse formato na v0.6.30. Não há evidência suficiente para atribuir a falha exclusivamente ao codec, resolução ou registro local.
