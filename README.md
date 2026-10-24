@@ -1,81 +1,20 @@
 # Huss Valley Panel
 
-Versão 0.6.32 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.33 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
 
-## Vídeo por ID do Roblox na versão 0.6.32
+## Remoção de mídia e trabalho ocioso na versão 0.6.33
 
-O teste comparativo real em **Delta 1.1.743.1136 / Roblox 2.743.1136** confirmou reprodução do asset público `5608384572`: IsLoaded true, resolução 1280×720, duração 10 s, TimePosition 0,047 s após cerca de 0,645 s e fetchStatus Success. O controle local VP8 de um segundo teve seus bytes escritos e relidos corretamente, mas falhou por timeout de 15 s, com `Failed to load`, duração/resolução zero e fetchStatus None. Isso isola a diferença ao caminho local daquele controle, sem demonstrar a causa interna do Delta ou incompatibilidade universal de arquivos locais. **O teste ocorreu em PlayerGui, com sameParentAsPanel false**; não comprova a mesma reprodução no host atual do painel.
+Por solicitação do usuário, o vídeo de fundo foi removido por completo: player, host, camada de escurecimento, configurações/ID, controles, registro/download/cache de mídia, verificações por Heartbeat, observação de erros, diagnóstico e ações. Os nove arquivos binários de mídia e `video-support-test.lua` foram retirados da árvore atual do repositório. O histórico Git anterior permanece disponível; ele não é baixado pelo loader. As instruções antigas para ativar ou testar vídeo foram removidas deste README.
 
-Em **Config → Video de fundo**, o formato **Roblox (ID)** e o campo **ID do video Roblox** aceitam um número ou `rbxassetid://ID`, normalizam o valor para texto numérico e salvam nos perfis. URLs arbitrárias, zero, valores negativos e entradas inválidas são recusados. Esse modo fornece o URI diretamente ao VideoFrame e dispensa writefile, getcustomasset e downloads locais do painel. O asset continua dependendo do acesso permitido pelo Roblox.
+A prévia 3D do próprio avatar na aba ESP também foi retirada: ViewportFrame, WorldModel, câmera, clone, cartão e chamadas de atualização. Os controles e desenhos do ESP permanecem; o módulo de geometria por quadro não foi alterado. As demais funções, incluindo Mobilador, Lock On, ações, perfis e carregamento inicial, foram preservadas.
 
-**Testar video Roblox** escolhe explicitamente o asset público do teste, ativa o vídeo e inicia no fundo do próprio painel. O campo passa a mostrar `5608384572`; é um clipe de demonstração, não o vídeo original do usuário. Use o mesmo loader e confira **v0.6.32**. Após tocar no botão, mantenha o painel aberto e copie seu diagnóstico se não houver reprodução após 15 segundos. A confirmação no host do painel ainda depende desse teste real.
+As consultas de personagem/câmera do Heartbeat agora só ocorrem quando algum recurso daquele bloco precisa delas. No callback de renderização, o personagem só é consultado antecipadamente quando Lock On ou Mobilador estão habilitados. O marcador ainda recebe a etapa de limpeza/fade quando desligado; cursor e ESP continuam sendo atualizados no mesmo ponto. Cadência de ESP, aquisição por proximidade e intervalos das ações não foram reduzidos.
 
-O modo por ID obtém as dimensões da resolução nativa reportada pelo player, preserva a proporção nos modos Inteiro/Preencher e não inventa FPS para vídeos do Roblox. Loaded e avanço de TimePosition continuam necessários para confirmar reprodução. A mudança de ID invalida callbacks antigos. Os formatos locais e seus arquivos, qualidade, padrões e opções permanecem intactos; a publicação não seleciona outro vídeo automaticamente.
+Ao reexecutar, a versão encerra uma eventual janela do teste antigo visível ao mesmo ambiente e tenta excluir apenas quatro arquivos locais conhecidos criados por estes recursos: os três caches de vídeo e o WebM pequeno de diagnóstico. A limpeza usa `delfile` quando disponível, não enumera diretórios, não toca nos perfis e deixa de repetir as consultas após sucesso. Falta de API ou falha de exclusão não bloqueiam o painel; a ausência da API pode deixar o cache no aparelho. Esta edição não remove os anexos originais do usuário.
 
-O vídeo particular ainda precisa ter um ID de vídeo Roblox e permissões para o contexto de uso. A [documentação de vídeo](https://create.roblox.com/docs/ui/video-frames) informa taxa de **2.000 Robux por upload** e as [regras de acesso a ativos](https://create.roblox.com/docs/projects/assets/privacy) precisam ser verificadas antes de considerar esse caminho para jogos de terceiros. Um upload pago, por si só, não garante acesso em qualquer experiência. Esta mudança não realizou upload, compra ou alteração de permissões.
+Use o **mesmo loader** e confira **v0.6.33**. Perfis antigos continuam aceitos; os campos aposentados de vídeo são ignorados e não são incluídos em novos salvamentos. Ganhos de FPS e memória no telefone não foram medidos.
 
-Validação: sintaxe completa, **32 casos simulados** do controlador e teste da função real de validação de configuração. Inclui os 26 casos anteriores, execução por ID sem APIs de arquivo, ID ausente, geometria pelas dimensões nativas, metadados de FPS desconhecidos, callbacks atrasados, botão de demonstração e timeout sem recomendar novamente o caminho local. As regiões externas ao controlador/configurações/UI de vídeo foram comparadas com a v0.6.31. O restante do painel não foi alterado. A reprodução no Android dentro do painel ainda não foi confirmada.
-
-## Teste comparativo separado de vídeo
-
-O teste real da v0.6.31 em WebM 720p também terminou sem carregamento, após 12,11 s: cache de 13.920.283 bytes encontrado, resolução/duração nativas zeradas e erro `Failed to load` do arquivo local. O último estado anterior à limpeza tinha player e host visíveis. Isso confirma a falha desse caminho no teste recebido; não identifica sozinho o componente responsável nem comprova que todo vídeo local seja incompatível com a versão do Delta.
-
-Foi acrescentado `video-support-test.lua`, independente do painel, executado somente quando solicitado:
-
-```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/main/video-support-test.lua"))()
-```
-
-Com o painel aberto, execute o teste e aguarde o resultado dos dois vídeos, em até 30 segundos. Use **Copiar resultado na janela do teste**, não o diagnóstico antigo do painel. O script mantém os ajustes do painel e usa uma interface separada, no mesmo parent do ScreenGui do painel quando disponível; usa PlayerGui como alternativa. Reexecutar ou fechar limpa os recursos anteriores do próprio teste.
-
-Os controles sequenciais usam a mesma configuração de player nativo visível, sem som:
-
-- Asset público `5608384572`, citado no [exemplo oficial de VideoFrame](https://create.roblox.com/docs/ui/video-frames). Acesso/rede/permissões ainda podem fazê-lo falhar no contexto testado; falha não comprova falta de suporte geral do cliente.
-- Arquivo local gerado para diagnóstico: VP8/yuv420p, 96×64, 12 FPS, 12 quadros, um segundo, sem áudio e 14.267 bytes. Bytes embutidos no script, escrita local e comparação de readback quando disponível, sem download desse controle. SHA-256: `2f1edb938a270c407814615cf2609731ebbcb30ead72d46e71a06f195de6be04`.
-
-Cada etapa tem prazo total de 15 segundos, incluindo preparação; resultados atrasados são descartados. `verified=true` exige IsLoaded e avanço de TimePosition. Playing e sucesso do ContentProvider não bastam. Erros nativos são restritos à fonte atual, mascarados e limitados. O resultado inclui nome/versão do executor e versão Roblox quando as APIs informam esses dados, sem capturar identificação do jogador ou entradas pessoais. Copiar depende de ação do usuário; há texto selecionável se clipboard não estiver disponível.
-
-Se somente o asset Roblox tocar, a diferença fica isolada ao caminho do arquivo local desse controle; isso não demonstra por si só a causa interna do Delta. Se ambos falharem, o resultado é **inconclusivo**, incluindo possíveis limitações de acesso ao asset, contexto de UI, rede ou cliente. Se o controle local tocar, o vídeo original continua precisando de investigação específica.
-
-Validação: sintaxe do script completo e nove casos simulados sobre progresso real, timeout, APIs ausentes, cancelamento, readback incorreto, resultados atrasados, isolamento de logs e limpeza. Os bytes embutidos foram reconstruídos e decodificados integralmente com FFmpeg. O `main.lua` da v0.6.31 não foi modificado por esta publicação. O teste no Delta ainda depende da execução no aparelho.
-
-## Compatibilidade e diagnóstico do vídeo na versão 0.6.31
-
-O teste real da v0.6.30 em WebM HQ terminou com 49 verificações, `loaded=false`, `timeLength=0` e `timePosition=0`. O cache tinha o tamanho esperado de 41.448.021 bytes. A visibilidade falsa do host/player no relatório é consequência da limpeza após o timeout; o estado anterior preservava `playing=true`, que não comprova reprodução. O relatório anterior do Original foi copiado com apenas 0,4 segundo e não confirma o resultado final desse formato na v0.6.30. Não há evidência suficiente para atribuir a falha exclusivamente ao codec, resolução ou registro local.
-
-Foi acrescentado **WebM 720p**, selecionável em **Config → Video de fundo → Formato**, mantendo Original como padrão e os arquivos anteriores intactos. A alternativa usa VP8, Vorbis e yuv420p, **960×720, 4:3, 60 FPS, 723 quadros**, com duração de contêiner de 12,054 s e 13.920.283 bytes. Reduz a resolução e usa compressão com perdas; não é qualidade idêntica ao Original. É uma tentativa de compatibilidade diante de [restrições de resolução registradas no player](https://devforum.roblox.com/t/roblox-videoframes-are-capped-at-1280x720/3901780), não uma confirmação da causa no Delta nem promessa de reprodução. Não há troca automática de formato.
-
-SHA-256 da alternativa: `bd61603df84a3c394f296ff057f95d54ca7bfe2febf508503c5ad518ccd3132a`. Os três arquivos binários estão fixados no commit `4c318ce3a3dd96530db53da5bd819352a89ce861`; cada hash Git foi conferido com os bytes locais. Cache, download único por arquivo e pausa/foco continuam iguais. A proporção e o diagnóstico agora usam as dimensões do formato escolhido.
-
-O diagnóstico preserva tempo de espera, resolução nativa e visibilidade anteriores à limpeza em `lastPlayback`, acrescenta a etapa da falha (`failureStage`) e consulta o estado de busca do ContentProvider quando acessível (`fetchStatus`). **Success na busca não confirma decodificação nem reprodução.** Durante a espera limitada, um observador de logs aceita apenas erros que nomeiem exatamente a fonte atual; mascara o URI e o caminho local e guarda até 240 caracteres em `nativeError`. O observador é removido ao pausar, concluir, falhar, desligar ou destruir. Ausência dessas APIs não impede a tentativa de vídeo. A mensagem de timeout recomenda 720p para os outros formatos e pede o diagnóstico quando 720p também falha.
-
-Para testar: use o mesmo loader, confira **v0.6.31**, escolha **WebM 720p** e mantenha o painel aberto. No primeiro uso há download de aproximadamente 14 MB; depois que aparecer Carregando video, aguarde 15 segundos e copie o diagnóstico se não tocar. O carregamento real no Delta continua pendente de teste no aparelho.
-
-Validação local: sintaxe do arquivo completo e **26 casos simulados**, incluindo todos os 19 casos anteriores e sete casos novos de diagnóstico, isolamento/limpeza de logs, APIs opcionais e formato 720p. Conversão verificada com ffprobe e decodificação completa. Nenhuma medição de desempenho ou reprodução no Android foi realizada. As regiões externas ao controlador de vídeo foram comparadas com a v0.6.30, exceto versão, aceitação do novo formato e texto/seletor da opção de vídeo.
-
-## Inicialização do vídeo na versão 0.6.30
-
-O diagnóstico da v0.6.29 mostrou `loaded=false`, `timeLength=0`, `timePosition=0`, sem transferência em andamento. Isso situa a espera no carregamento nativo, mas não comprova, sozinho, incompatibilidade permanente com o formato nem falha no temporizador: o relatório não registrava há quantos segundos o player estava nessa etapa.
-
-A fonte agora só é atribuída **depois** que o VideoFrame tem parent e seu evento Loaded está conectado. A inicialização anterior atribuía Video dentro do construtor genérico, antes de Parent. Essa ordem está relacionada a um [problema confirmado pela equipe do Roblox](https://devforum.roblox.com/t/videoframe-does-not-play-no-matter-what/3905848), cuja orientação é atribuir Video após a inclusão na interface. A ligação continua no mesmo host do painel; o efeito sobre arquivos locais do Delta ainda requer confirmação no aparelho.
-
-Ao abrir o painel, o player e o host ficam visíveis e recebem Play sem esperar IsLoaded. Isso remove a dependência anterior entre carregar, iniciar e tornar o player visível. Visibilidade ou Playing, por si só, continuam sem significar sucesso: a mensagem Reproduzindo exige IsLoaded e avanço real do tempo. Fechar ou perder foco pausa e oculta o player. Reabrir exige nova confirmação de avanço. Reaplicar a sincronização durante uma espera ativa não reinicia o prazo de 12 segundos; esse prazo só reinicia em uma ativação ou tentativa explícita nova.
-
-O diagnóstico acrescenta tempo desde a ativação (`loadAge`), foco, estado ativo, observador (`watching`), número de verificações (`probeCount`), visibilidade do frame/host, esquema retornado pelo registro, bytes do arquivo, uso do cache e resolução nativa quando disponível. Nenhuma URL pessoal é exportada. Para testar: use o mesmo loader, confira v0.6.30 e **Tentar carregar video**; mantenha o painel aberto por 15 segundos. Se não tocar, copie o diagnóstico; teste também WebM HQ. O MP4 original e o WebM anteriores permanecem intactos, com a mesma resolução e cadência.
-
-Validação local: sintaxe completa, **19 casos simulados** do controlador, incluindo ordem de atribuição/parent, evento conectado antes da fonte, decoder que só carrega visível e com Play solicitado, prazo não prorrogado por Sync repetido e resultados atrasados com painel fechado. O código fora do controlador foi comparado integralmente com a v0.6.29, descontando a versão. A correção dessa sequência não garante que o decoder do Delta aceite arquivos locais.
-
-## Vídeo de fundo na versão 0.6.29
-
-Use o mesmo loader e abra **Config → Video de fundo**. O MP4 recebido foi mantido byte a byte, em **1440×1080, 4:3, 60 FPS**, com 723 quadros. O arquivo fornecido não contém 120 FPS. O padrão **Original** usa esse arquivo; **WebM HQ** é uma alternativa explicitamente selecionável, convertida para VP9 CRF 10/Opus, na mesma resolução e cadência. Essa conversão é de alta qualidade, com SSIM alinhado de 0,996806, mas não é sem perdas. Os dados são distribuídos em partes e reunidos em um único arquivo local com conferência de tamanho e assinatura do formato.
-
-**Inteiro** mostra o quadro completo com barras quando necessário; **Preencher** recorta as bordas mantendo a proporção. Escurecimento e volume têm ajustes próprios; o áudio começa mudo. Se os cartões encobrirem a imagem, ajuste a **Transparencia** existente no mesmo menu. O vídeo usa o decoder nativo, baixa apenas quando o painel está aberto e não há cache válido, pausa com o painel fechado ou sem foco e reaproveita o arquivo nas próximas execuções. Não há conversão de quadros para imagens nem envio de vídeo pela rede durante a reprodução.
-
-A reprodução por arquivo local depende de `writefile`, `getcustomasset` e do suporte efetivo do Delta ao formato. O painel só informa **Reproduzindo** depois que `IsLoaded` é verdadeiro e `TimePosition` avança. Falha de download, ausência de APIs, carregamento sem conclusão ou tempo parado produzem uma mensagem, sem manter um observador de verificação ativo para sempre. Há **Tentar carregar video** e **Copiar diagnostico do video**, incluindo as últimas leituras do player em caso de falha. Se Original falhar, teste WebM HQ. Ainda não foi possível confirmar a reprodução no Roblox/Delta; os 60 FPS indicados são da fonte, não uma medição no aparelho. A qualidade e fluidez finais dependem do decoder e do dispositivo.
-
-O código das opções anteriores foi preservado. O arquivo original tem SHA-256 `390b9da02d007cabbb9fe5811fe6bd59c46e237dfa329a2b2103f654366bf595` e 17.413.442 bytes; a alternativa WebM tem SHA-256 `41a40e874d526840799398700c14a64f732e29027658bd26cc10ce1d059a1c39` e 41.448.021 bytes.
-
-Validação local: sintaxe do script completo com Lua 5.4, **13 casos simulados** do vídeo, regressões anteriores de câmera/perfis e 21 casos do xadrez. Foram conferidos pausa/retomada, cache, download incompleto, troca de formato durante transferência, resultados atrasados, ausência de APIs, carregamento sem progresso, limpeza de observadores e proporção em diferentes escalas. Os hashes dos seis blobs de mídia correspondem às partes dos arquivos locais; a comparação de quadros foi feita com cadência e início alinhados. Esses testes não substituem a execução no Delta.
+Validação: sintaxe do arquivo completo; oito casos simulados do agendamento por quadro; três de limpeza/migração; um de compatibilidade com os campos antigos do perfil; e comparação do trabalho ocioso com a versão anterior. Nas 120 iterações simuladas, as consultas antecipadas ao personagem nesses dois callbacks caíram de 240 para zero quando os recursos estavam desligados. Essa contagem não mede custo de outras rotinas nem FPS. A comparação integral do restante do código confirmou que as alterações ficaram nas remoções acima e nos dois pontos de agendamento. Nenhuma reprodução real no Roblox/Delta foi executada neste ambiente.
 
 ## Assistente de xadrez para RoChess na versão 0.6.28
 
@@ -661,11 +600,11 @@ O arquivo é independente e não baixa bibliotecas de interface. A compatibilida
 ## Interface e recursos implementados
 
 - Boas-vindas com avatar, painel escuro, destaque coral, barra de ícones, duas colunas, opções expansíveis e transição leve de texto.
-- Categorias: Combat, AI, ESP, World, Automation, Performance, Emotes e Config.
-- Ajuste à tela, arrastar pela parte superior, botão flutuante, botão UI para escala/transparência, minimizar e alternar pela tecla Right Shift. A tecla pode ser alterada em Config.
+- Categorias: Combat, AI, ESP, World, Shaders, Automation, Performance, Emotes e Config.
+- Ajuste à tela, arrastar pela parte superior, botão flutuante, botão UI para escala/transparência, minimizar e alternar pela tecla F4. A tecla pode ser alterada em Config.
 - Velocidade local, fly com controles verticais por toque, noclip, deslocamento adicional, salto no ar, spin, primeira pessoa, FOV, mouse livre, iluminação e X-Ray locais.
 - Player Lock On com modo Console de alvo persistente, enquadramento elevado de perto, mira animada, botão flutuante, tecla configurável e filtro de time opcional. Modo Classico preserva raio, previsão e busca automática anteriores. Não executa captura específica do jogo.
-- ESP de jogadores: caixas, nomes, linhas, vida, distância, articulações, ponto na cabeça, direção de visão, cores por time e Highlight. Inclui preview estático do próprio avatar.
+- ESP de jogadores: caixas, nomes, linhas, vida, distância, articulações, ponto na cabeça, direção de visão, cores por time e Highlight.
 - Auto Attack usa a integração de melee descrita acima quando disponível; Auto Use Gears continua ativando a ferramenta equipada. Auto Revive e Auto Pick somente acionam ProximityPrompts reconhecidos, próximos e habilitados, quando o executor oferece `fireproximityprompt`. Auto Revive não implementa reviver a si mesmo por um evento desconhecido.
 - Redução de texturas, efeitos, materiais, sombras e neblina; restauração dos valores anteriores; limite de FPS somente quando o executor oferece `setfpscap`. Restaurar o limite anterior depende de `getfpscap`.
 - Anti-Idle por evento do cliente e reconexão ao servidor. O sistema AFK próprio do jogo é separado.
