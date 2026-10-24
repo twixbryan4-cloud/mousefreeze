@@ -1,6 +1,20 @@
 # Huss Valley Panel
 
-Versão 0.6.27 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.28 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Assistente de xadrez para RoChess na versão 0.6.28
+
+Use o mesmo loader. Em **AI → Assistente de xadrez - RoChess**, uma opção liga a leitura automática da partida. O recurso começa desligado e é restrito ao RoChess do link recebido: place **139717576471404**, universe **10768845402**. Ao entrar na sua vez, aparece um quadro arrastável com até três sugestões e setas coloridas no tabuleiro compatível. A primeira sugestão é o melhor lance devolvido pelo motor local; as demais são alternativas avaliadas. Não há captura de tela ou seleção manual da cor. A escolha e execução da jogada continuam com o jogador.
+
+A integração verifica as interfaces de `ReplicatedStorage.Chess.Engine`, `ReplicatedStorage.Chess.Bot` e `ReplicatedStorage.ChessClient.App`, identificadas numa [referência pública de compatibilidade](https://scriptblox.com/raw/RoChess-ROCHESS-ENGINE-auto-play-rage-and-legit-game-helper-232745). O código deste adaptador foi escrito para o painel. A existência e os formatos dos módulos são conferidos no cliente ao ativar; ainda não houve execução desta versão no Roblox/Delta. O motor utilizado é o Bot local disponibilizado pelo jogo, sem equivalência garantida ao Stockfish do aplicativo Android.
+
+A posição vem do FEN atual do motor da sessão, incluindo roque, en passant e promoções. O adaptador valida os lances com o Engine, calcula continuações em cópias dessa posição e conserva a orientação das peças pelas coordenadas do tabuleiro nativo. Só mostra sugestões na sua vez e no lance atual. Trocar de sessão, posição, tabuleiro, cor, revisão ou terminar a partida invalida os resultados pendentes. Chaves próprias identificam as setas do painel; a limpeza preserva as outras setas do jogo.
+
+Enquanto ligado, verifica mudanças a cada 0,15 s e não repete uma análise concluída para a mesma posição. A busca principal pede 0,12 s/profundidade 12. As alternativas pedem 0,01 s/profundidade 6 por continuação, até 64 continuações e uma janela total de 0,75 s, com devolução ao agendador entre elas. Quando a janela não permite examinar todas, o quadro informa **alternativas parciais**; as opções 2 e 3 não são apresentadas como classificação global garantida. Os limites de busca são pedidos à implementação nativa; não representam uma medição de duração ou FPS no aparelho.
+
+Desligar remove o observador, oculta o quadro e apaga as setas próprias. Uma chamada nativa já em andamento pode terminar, mas seu resultado é descartado; nenhuma busca nova é iniciada em paralelo. As pausas do adaptador entre chamadas podem ser canceladas. Os perfis salvam a nova opção pelo fluxo existente; câmera, Lock On, ESP, botões e demais configurações conservam seu código.
+
+Validação local: sintaxe do arquivo inteiro com Lua 5.4, **21 casos simulados** do adaptador, oito posições de referência e 143 posições/continuações produzidas independentemente com python-chess. Cobrem roque, en passant, promoção, brancas/pretas, posição atual, fim de jogo, revisão, troca de sessão com o mesmo ID, resultados atrasados, falhas de módulos/motor, limpeza, orçamento parcial, perfis e ausência de trabalho quando desligado. Passaram também as simulações anteriores de liberdade de câmera e perfis. O desempenho e a compatibilidade efetiva com os módulos do RoChess precisam ser conferidos no Delta. Se aparecer uma mensagem de incompatibilidade, use **Copiar diagnostico do xadrez** no mesmo cartão e envie o resultado.
 
 ## Mais liberdade lateral no Lock On na versão 0.6.27
 

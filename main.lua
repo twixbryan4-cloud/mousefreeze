@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.27
+-- Huss Valley Panel 0.6.28
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -32,6 +32,7 @@ local defaults = {
     lockMode="Console", lockButton=false, lockKey="L", lockReleaseRange=80, lockWallCheck=true, lockCameraFreedom=85,
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
     autoRevive=false, autoPick=false, promptDelay=0.6,
+    chessAssistant=false,
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
     autoAbility=false, dashSide="Right",dashRange=15,dashDelay=1,dashKey="Q",dashKeyboardFallback=false,tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
     autoVote=false, disableGameAFK=false, antiIdle=false, antiHit=false,
@@ -54,7 +55,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.27", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.28", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -395,6 +396,9 @@ set=function(key,value,quiet,keyContext)
         return false
     end
     if key=="unlockFPS" and newValue and type(setfpscap)~="function" and type(env.setfpscap)~="function" then notify("Esta versao do executor nao fornece setfpscap."); return false end
+    if key=="chessAssistant" and newValue and API.Chess and not API.Chess.IsGame() then
+        API.Chess.Status("Disponivel somente no RoChess");notify("Assistente de xadrez especifico do RoChess.");return false
+    end
     if key=="pcInputMode" and newValue and API.InputMode then
         local available,reason=API.InputMode.CanEnable()
         if not available then API.InputMode.Status(reason);notify(reason);return false end
@@ -919,6 +923,11 @@ actionButton(c,"Copiar ultimo registro",function() API.CopyHitDiagnostics() end)
 actionButton(c,"Gravar rodada inteira",function() API.StartGeneralDiagnostics() end)
 left,right=page("AI",3)
 pending(left,"Runner AI","runnerAI");pending(right,"Catcher AI","catcherAI")
+do
+    local content=card(right,"Assistente de xadrez - RoChess","chessAssistant","Ligue durante a partida para receber sugestoes automaticamente na sua vez. Quadro arrastavel e setas no tabuleiro; usa o motor local do jogo.")
+    API.ChessStatus=text(content,"Desligado",9,{Size=UDim2.new(1,0,0,36),TextWrapped=true})
+    actionButton(content,"Copiar diagnostico do xadrez",function() if API.CopyChessDiagnostics then API.CopyChessDiagnostics() end end)
+end
 local info=card(left,"Huss Valley / integracao",nil,"O caminho do mapa, zonas seguras, equipes e controles precisam ser identificados dentro do jogo. Use o diagnostico para a proxima etapa.")
 actionButton(info,"Copiar diagnostico",function() API.ExportDiagnostics() end)
 
@@ -3968,6 +3977,262 @@ do
     listen(Input.GamepadDisconnected,function() K.stick=Vector2.new(0,0) end)
     listen(workspace:GetPropertyChangedSignal("CurrentCamera"),K.CameraChanged)
 end
+-- RoChess suggestions use a checked native module interface; no move is submitted.
+do
+    local C={running=false,generation=0,message="Desligado",rows={},analyses=0,nextBind=0}
+    API.Chess=C
+    local arrowKeys={"HussChessHint1","HussChessHint2","HussChessHint3"}
+    local colors={Color3.fromRGB(117,222,150),Color3.fromRGB(111,180,255),Color3.fromRGB(246,204,110)}
+    function C.IsGame() return game.GameId==10768845402 or game.PlaceId==139717576471404 end
+    function C.Status(message)
+        C.message=message
+        local labels={API.ChessStatus,C.statusLabel}
+        for index=1,2 do local label=labels[index];if label and label.Text~=message then label.Text=message end end
+    end
+    function C.ClearBoard()
+        local board=C.arrowBoard;C.arrowBoard=nil
+        if type(board)=="table" and type(board.setArrow)=="function" then
+            for _,key in ipairs(arrowKeys) do pcall(board.setArrow,board,key,nil) end
+        end
+    end
+    function C.ClearRows()
+        C.ClearBoard();C.rows={}
+        for index,label in ipairs(C.rowLabels or {}) do label.Text=index.."  -" end
+    end
+    function C.EnsureHUD()
+        if C.hud then C.hud.Visible=true;return end
+        local cam=workspace.CurrentCamera
+        local width=math.min(280,math.max(160,(cam and cam.ViewportSize.X or 300)-20))
+        C.hud=themed(create("Frame",{Name="ChessSuggestions",Position=UDim2.new(1,-width-10,0,72),
+            Size=UDim2.fromOffset(width,130),BackgroundTransparency=0.1,BorderSizePixel=0,ZIndex=22},gui),"BackgroundColor3","card")
+        round(C.hud,9)
+        accented(create("UIStroke",{Thickness=1,Transparency=0.5},C.hud),"Color")
+        local handle=create("Frame",{Name="DragHeader",Size=UDim2.new(1,0,0,26),BackgroundTransparency=1,Active=true,ZIndex=23},C.hud)
+        text(handle,"ROCHESS / SUGESTOES",10,{Position=UDim2.fromOffset(10,2),Size=UDim2.new(1,-20,1,0),Font=Enum.Font.GothamBold,ZIndex=24})
+        API.UI.Draggable(handle,C.hud)
+        C.statusLabel=text(C.hud,C.message,9,{Position=UDim2.fromOffset(10,28),Size=UDim2.new(1,-20,0,24),TextWrapped=true,ZIndex=23})
+        C.rowLabels={}
+        for index=1,3 do C.rowLabels[index]=text(C.hud,index.."  -",11,{Position=UDim2.fromOffset(10,52+(index-1)*23),
+            Size=UDim2.new(1,-20,0,22),TextColor3=colors[index],ZIndex=23}) end
+    end
+    function C.ValidFen(fen)
+        if type(fen)~="string" or #fen>200 then return nil end
+        local fields={};for field in fen:gmatch("%S+") do fields[#fields+1]=field end
+        if #fields~=6 or (fields[2]~="w" and fields[2]~="b") then return nil end
+        local ranks,whiteKing,blackKing=0,0,0
+        for rank in fields[1]:gmatch("[^/]+") do
+            local count=0;ranks=ranks+1
+            for item in rank:gmatch(".") do
+                if item:match("^[1-8]$") then count=count+tonumber(item)
+                elseif item:match("^[prnbqkPRNBQK]$") then
+                    count=count+1;if item=="K" then whiteKing=whiteKing+1 elseif item=="k" then blackKing=blackKing+1 end
+                else return nil end
+            end
+            if count~=8 then return nil end
+        end
+        if ranks~=8 or whiteKing~=1 or blackKing~=1 or fields[1]:find("//",1,true)
+            or fields[1]:sub(1,1)=="/" or fields[1]:sub(-1)=="/" then return nil end
+        if fields[3]~="-" and (fields[3]=="" or not fields[3]:match("^K?Q?k?q?$")) then return nil end
+        if fields[4]~="-" and not fields[4]:match("^[a-h][36]$") then return nil end
+        if not fields[5]:match("^%d+$") or not fields[6]:match("^%d+$") then return nil end
+        local half,full=tonumber(fields[5]),tonumber(fields[6])
+        if not half or not full or half>1000000 or full<1 or full>1000000 then return nil end
+        return fields[2]=="w" and 1 or -1
+    end
+    function C.Read()
+        local native=C.native;if not native then return nil,"Aguardando modulos do RoChess" end
+        local session=native.App.session
+        if type(session)~="table" or session.kind=="idle" then return nil,"Entre em uma partida" end
+        if session.over then return nil,"Partida encerrada" end
+        if type(session.ucis)~="table" or #session.ucis>2048 or session.viewPly~=#session.ucis then return nil,"Volte ao lance atual da partida" end
+        if session.myColor~=1 and session.myColor~=-1 then return nil,"Aguardando sua cor na partida" end
+        if type(session.engine)~="table" or type(session.engine.getFen)~="function" then return nil,"Posicao nativa indisponivel" end
+        local fen=session.engine:getFen();local turn=C.ValidFen(fen)
+        if not turn then return nil,"Posicao nativa incompativel" end
+        if turn~=session.myColor then return nil,"Vez do adversario" end
+        if native.App.session~=session then return nil,"Atualizando partida" end
+        return {session=session,fen=fen,color=turn,ply=#session.ucis,board=native.App.board}
+    end
+    function C.Same(a,b)
+        return a and b and a.session==b.session and a.fen==b.fen and a.color==b.color and a.ply==b.ply and a.board==b.board
+    end
+    function C.Current(position,generation)
+        if not state.alive or not C.running or not cfg.chessAssistant or generation~=C.generation or C.position~=position then return false end
+        local ok,live=pcall(C.Read)
+        return ok and C.Same(position,live) or false
+    end
+    function C.CancelJob()
+        local job=C.job
+        if job and not job.inNative and job.thread and type(task.cancel)=="function" and job.thread~=coroutine.running() then
+            local ok=pcall(task.cancel,job.thread)
+            if ok and C.job==job then C.job=nil end
+        end
+    end
+    function C.Invalidate()
+        C.generation=C.generation+1;C.CancelJob();C.position=nil;C.completed=nil;C.ClearRows()
+    end
+    function C.Launch(callback,position)
+        if C.job then return false end
+        local job={generation=C.generation,started=os.clock()};C.job=job
+        job.thread=task.defer(function()
+            if not C.running or job.generation~=C.generation then if C.job==job then C.job=nil end;return end
+            local ok,err=pcall(callback,job.generation)
+            if C.job==job then C.job=nil end
+            if not ok and C.running and job.generation==C.generation then
+                C.lastError=tostring(err):sub(1,220);C.nextBind=os.clock()+3
+                if position then C.completed=position end
+                C.ClearRows();C.Status("Motor incompativel; copie o diagnostico")
+            end
+        end)
+        return true
+    end
+    function C.Bind()
+        local chess=Replicated:FindFirstChild("Chess");local client=Replicated:FindFirstChild("ChessClient")
+        local engine=chess and chess:FindFirstChild("Engine");local bot=chess and chess:FindFirstChild("Bot")
+        local app=client and client:FindFirstChild("App")
+        C.modules={Engine=engine~=nil,Bot=bot~=nil,App=app~=nil}
+        C.nextBind=os.clock()+3
+        if not engine or not bot or not app then C.Status("Aguardando modulos compativeis do RoChess");return end
+        if not engine:IsA("ModuleScript") or not bot:IsA("ModuleScript") or not app:IsA("ModuleScript") then C.Status("Estrutura do RoChess incompativel");return end
+        C.Launch(function(generation)
+            local job=C.job;if job then job.inNative=true end
+            local E,B,A=require(engine),require(bot),require(app)
+            if job then job.inNative=false end
+            if not C.running or C.generation~=generation then return end
+            assert(type(E)=="table" and type(E.new)=="function" and type(E.algToIndex64)=="function","Engine indisponivel")
+            assert(type(B)=="table" and type(B.analyse)=="function" and type(A)=="table","Bot/App indisponivel")
+            C.native={Engine=E,Bot=B,App=A};C.Status("Lendo a partida")
+        end)
+    end
+    function C.Legal(engine)
+        local iterator,context,key=engine:legalMoves()
+        local moves,seen={},{}
+        local function add(move)
+            local uci=engine:moveToUci(move)
+            if type(uci)~="string" or not (uci:match("^[a-h][1-8][a-h][1-8]$") or uci:match("^[a-h][1-8][a-h][1-8][qrbn]$")) then return end
+            if not seen[uci] then seen[uci]=true;moves[#moves+1]={uci=uci,move=move} end
+        end
+        if type(iterator)=="table" then for index,move in ipairs(iterator) do assert(index<=256,"Lances demais");add(move) end
+        elseif type(iterator)=="function" then
+            for index=1,257 do
+                local nextKey,move=iterator(context,key);key=nextKey
+                if key==nil then return moves end
+                assert(index<=256,"Lances demais");add(move)
+            end
+        else error("Lista de lances indisponivel") end
+        return moves
+    end
+    function C.Publish(position,generation,rows,message)
+        if not C.Current(position,generation) then return false end
+        C.ClearBoard();C.rows=rows
+        for index,label in ipairs(C.rowLabels or {}) do
+            local row=rows[index];local value=index.."  -"
+            if row then value=index.."  "..row.san.."  ("..row.uci..")" end
+            if label.Text~=value then label.Text=value end
+        end
+        local board=position.board;C.arrowsSupported=type(board)=="table" and type(board.setArrow)=="function"
+        if C.arrowsSupported then
+            C.arrowBoard=board
+            for index,row in ipairs(rows) do
+                local from=C.native.Engine.algToIndex64(row.uci:sub(1,2));local to=C.native.Engine.algToIndex64(row.uci:sub(3,4))
+                if from and to then pcall(board.setArrow,board,arrowKeys[index],from,to,colors[index],0.12) end
+            end
+        end
+        C.Status(message);return true
+    end
+    function C.Search(bot,fen,seconds,depth)
+        local job=C.job;if job then job.inNative=true end
+        local ok,result=pcall(bot.analyse,fen,{},seconds,depth)
+        if job then job.inNative=false end
+        if not ok then error(result) end
+        return result
+    end
+    function C.Analyze(position,generation)
+        local native=C.native;local E,B=native.Engine,native.Bot
+        local engine=E.new(position.fen);local moves=C.Legal(engine)
+        if not C.Current(position,generation) then return end
+        C.analyses=C.analyses+1
+        if #moves==0 then C.completed=position;C.Status("Sem lances legais nesta posicao");return end
+        local byUci={};for _,move in ipairs(moves) do byUci[move.uci]=move end
+        local result=C.Search(B,position.fen,0.12,12)
+        if not C.Current(position,generation) then return end
+        assert(type(result)=="table" and type(result.best)=="string" and byUci[result.best],"O motor retornou um lance invalido")
+        local best=byUci[result.best]
+        local function row(entry)
+            local ok,san=pcall(engine.moveToSan,engine,entry.move)
+            return {uci=entry.uci,san=ok and type(san)=="string" and san:sub(1,30) or entry.uci}
+        end
+        C.Publish(position,generation,{row(best)},"Melhor do motor; avaliando alternativas")
+        local alternatives={};local began=os.clock();local examined=0
+        for _,entry in ipairs(moves) do
+            if entry~=best and examined<64 and os.clock()-began<0.75 then
+                if not C.Current(position,generation) then return end
+                -- Every branch starts from the current FEN, including castling and en-passant rights.
+                local child=E.new(position.fen);local move=child:moveFromUci(entry.uci)
+                assert(move~=nil,"Continuacao invalida");child:play(move)
+                local ok,score=pcall(function()
+                    local evaluation=C.Search(B,child:getFen(),0.01,6)
+                    return evaluation and evaluation.score
+                end)
+                if not C.Current(position,generation) then return end
+                examined=examined+1
+                if ok and type(score)=="number" and score==score and math.abs(score)<math.huge then
+                    alternatives[#alternatives+1]={entry=entry,order=score*position.color}
+                end
+                task.wait()
+            end
+        end
+        if not C.Current(position,generation) then return end
+        table.sort(alternatives,function(a,b) if a.order==b.order then return a.entry.uci<b.entry.uci end;return a.order>b.order end)
+        local rows={row(best)}
+        for index=1,math.min(2,#alternatives) do rows[#rows+1]=row(alternatives[index].entry) end
+        C.examined=examined;C.partial=examined<#moves-1
+        C.Publish(position,generation,rows,C.partial and "Melhor do motor + alternativas parciais" or "Melhor do motor + alternativas avaliadas")
+        C.completed=position
+    end
+    function C.Poll()
+        if not state.alive or state.booting or not C.running or not cfg.chessAssistant then return end
+        if not C.native then if not C.job and os.clock()>=C.nextBind then C.Bind() end;return end
+        local position,message=C.Read()
+        if not position then
+            if C.position then C.Invalidate() end
+            C.Status(message);return
+        end
+        if not C.Same(C.position,position) then C.Invalidate();C.position=position;C.Status("Analisando sua posicao") end
+        if not C.job and C.completed~=C.position then
+            local current=C.position;C.Launch(function(generation) C.Analyze(current,generation) end,current)
+        end
+    end
+    function C.Stop()
+        C.running=false
+        if C.connection then C.connection:Disconnect();C.connection=nil end
+        C.Invalidate();C.native=nil
+        if C.hud then C.hud.Visible=false end
+        C.Status("Desligado")
+    end
+    function C.Start()
+        C.Stop()
+        if not C.IsGame() then C.Status("Disponivel somente no RoChess");return end
+        C.running=true;C.nextBind=0;C.lastError=nil;C.EnsureHUD();C.Status("Aguardando partida do RoChess")
+        local elapsed=0
+        C.connection=Run.Heartbeat:Connect(function(dt)
+            elapsed=elapsed+dt;if elapsed<0.15 then return end;elapsed=0
+            local ok,err=pcall(C.Poll)
+            if not ok then C.lastError=tostring(err):sub(1,220);C.Invalidate();C.native=nil;C.nextBind=os.clock()+3;C.Status("Leitura incompativel; copie o diagnostico") end
+        end)
+        C.Poll()
+    end
+    function C.Snapshot()
+        return {kind="RoChessDiagnostics",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
+            enabled=cfg.chessAssistant,running=C.running,message=C.message,modules=C.modules,
+            nativeReady=C.native~=nil,busy=C.job~=nil,analyses=C.analyses,lastError=C.lastError,
+            nativeBusy=C.job and C.job.inNative or false,busySeconds=C.job and os.clock()-C.job.started or 0,
+            fen=C.position and C.position.fen,color=C.position and C.position.color,
+            suggestions=C.rows,alternativesExamined=C.examined,partialAlternatives=C.partial,boardArrows=C.arrowsSupported}
+    end
+    actions.chessAssistant=function(enabled) if enabled then C.Start() else C.Stop() end end
+end
+-- End RoChess suggestions.
 local prompts,promptsReady,promptsScanning={},false,false
 local function indexPrompt(o) if o:IsA("ProximityPrompt") then prompts[o]=true end end
 local function preparePrompts(immediate)
@@ -5082,6 +5347,9 @@ end
 function API.CopyInputModeDiagnostics()
     return presentDiagnostic(Http:JSONEncode(API.InputMode.Snapshot()),"Diagnostico de entrada copiado.")
 end
+function API.CopyChessDiagnostics()
+    return presentDiagnostic(Http:JSONEncode(API.Chess.Snapshot()),"Diagnostico do xadrez copiado.")
+end
 function API.CopyLockDiagnostics()
     local k=API.LockOn;local cam=workspace.CurrentCamera
     local report={kind="LockOnRelease",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
@@ -5811,6 +6079,7 @@ end)
 function API.Destroy()
     if not state.alive then return end
     state.alive=false;perfToken=perfToken+1;xrayToken=xrayToken+1
+    if API.Chess then API.Chess.Stop() end
     if API.UI then API.UI.Stop() end
     if API.InputMode then API.InputMode.Destroy() end
     if API.Loading then API.Loading.Stop() end
