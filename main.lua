@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.33
+-- Huss Valley Panel 0.6.34
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -66,7 +66,7 @@ local defaults = {
     shaders=false, shaderFloors=true, shaderWalls=true, shaderPolish=false, shaderShadows=true,
     shaderReflection=0.28, shaderWallReflection=0.14, shaderContrast=0.14, shaderSaturation=-0.06,
     shaderExposure=0.05, shaderBloom=0.12, shaderTemperature=0,
-    uiScale=1, opacity=0.94, transparency=6, theme="Dark", accent="Peach", rainbow=false,
+    uiScale=1, opacity=0.82, transparency=18, theme="Glass", accent="Blue", rainbow=false,
     sounds=false, notifications=true, floating=true, toggleKey="F4", autoLoad=false,
 }
 local cfg = {}
@@ -75,7 +75,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.33", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.34", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -118,8 +118,8 @@ local function tween(object,props,duration)
 end
 local palette = {Peach=Color3.fromRGB(244,157,143),Purple=Color3.fromRGB(168,135,246),
     Blue=Color3.fromRGB(106,168,255),Pink=Color3.fromRGB(241,126,190),Green=Color3.fromRGB(110,212,172)}
-local accent = palette.Peach
-local colors={bg=Color3.fromRGB(16,14,23),card=Color3.fromRGB(27,23,36),text=Color3.fromRGB(235,232,240),muted=Color3.fromRGB(147,140,158)}
+local accent = palette.Blue
+local colors={bg=Color3.fromRGB(17,29,45),card=Color3.fromRGB(39,58,81),text=Color3.fromRGB(239,247,255),muted=Color3.fromRGB(174,194,216),track=Color3.fromRGB(65,86,111)}
 local themes, accentItems = {}, {}
 local function pageOf(object)
     local p=object.Parent
@@ -129,14 +129,16 @@ local function pageOf(object)
         p=p.Parent
     end
 end
-local function surface(object,base)
-    menuSurfaces[#menuSurfaces+1]={object=object,base=base,page=pageOf(object)}
+local function surface(object,base,glassBase)
+    menuSurfaces[#menuSurfaces+1]={object=object,base=base,glass=glassBase or base+(1-base)*0.32,page=pageOf(object)}
 end
 local function applyAppearance()
     local alpha=cfg.transparency/100
     for _,entry in ipairs(menuSurfaces) do
         if entry.object.Parent and (not entry.page or entry.page.Visible) then
-            entry.object.BackgroundTransparency=entry.base+(1-entry.base)*alpha
+            local base=cfg.theme=="Glass" and entry.glass or entry.base
+            local value=base+(1-base)*alpha
+            if entry.object.BackgroundTransparency~=value then entry.object.BackgroundTransparency=value end
         end
     end
     uiDirty=false
@@ -162,7 +164,7 @@ local function button(parent,value,size,props)
     local p={Text=value,TextSize=size or 12,Font=Enum.Font.GothamMedium,TextColor3=colors.text,
         BackgroundColor3=colors.card,BorderSizePixel=0,AutoButtonColor=false,Size=UDim2.new(1,0,0,28)}
     for k,v in pairs(props or {}) do p[k]=v end
-    local b=create("TextButton",p,parent); round(b,5); themed(b,"TextColor3","text"); themed(b,"BackgroundColor3","card")
+    local b=create("TextButton",p,parent); round(b,8); themed(b,"TextColor3","text"); themed(b,"BackgroundColor3","card")
     local page=pageOf(b);if page then pages[page.Name].texts[#pages[page.Name].texts+1]=b end
     local ancestor=parent
     while ancestor do
@@ -375,7 +377,7 @@ local function valid(key,value,keyContext)
     if type(value)=="number" then
         if value~=value or math.abs(value)==math.huge then return false end
         local r=ranges[key]; if r then value=math.clamp(value,r[1],r[2]) end
-    elseif key=="theme" and value~="Dark" and value~="Black" then return false
+    elseif key=="theme" and value~="Dark" and value~="Black" and value~="Glass" then return false
     elseif key=="accent" and not palette[value] then return false
     elseif key=="dashSide" and value~="Right" and value~="Left" then return false
     elseif key=="lockMode" and value~="Console" and value~="Classico" then return false
@@ -451,13 +453,48 @@ end
 -- A compact sidebar and two columns follow the reference; the layout fits the viewport.
 local window=themed(create("Frame",{Name="Window",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.46),
     Size=UDim2.fromOffset(730,438),BackgroundTransparency=1-cfg.opacity,BorderSizePixel=0,ClipsDescendants=true,Visible=false},gui),"BackgroundColor3","bg")
-round(window,11)
-surface(window,0)
+round(window,18)
+surface(window,0,0.26)
 local scale=create("UIScale",{Scale=1},window)
 local border=create("UIStroke",{Color=Color3.fromRGB(65,52,70),Thickness=1,Transparency=0.25},window)
-create("UIGradient",{Rotation=32,Color=ColorSequence.new(Color3.fromRGB(255,255,255),Color3.fromRGB(180,167,205))},window)
+local windowGradient=create("UIGradient",{Rotation=32,Color=ColorSequence.new(Color3.fromRGB(255,255,255),Color3.fromRGB(180,167,205))},window)
+-- Static glass decoration: native 2D primitives, behind the existing input controls.
+do
+    local G={layers={},normalGradient=windowGradient.Color,
+        glassGradient=ColorSequence.new(Color3.fromRGB(244,251,255),Color3.fromRGB(150,181,218))}
+    API.Glass=G
+    local edgeGradient=create("UIGradient",{Rotation=30,Color=ColorSequence.new(Color3.fromRGB(255,255,255),Color3.fromRGB(153,203,255)),
+        Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,0.05),NumberSequenceKeypoint.new(0.5,0.65),NumberSequenceKeypoint.new(1,0.12)})},border)
+    local inset=create("Frame",{Name="GlassInset",Position=UDim2.fromOffset(2,2),Size=UDim2.new(1,-4,1,-4),
+        BackgroundTransparency=1,BorderSizePixel=0,Active=false,Selectable=false},window)
+    round(inset,16);create("UIStroke",{Color=Color3.fromRGB(229,244,255),Thickness=0.8,Transparency=0.88},inset)
+    local sheen=create("Frame",{Name="GlassSheen",Position=UDim2.fromOffset(1,1),Size=UDim2.new(1,-2,0,100),
+        BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,Active=false,Selectable=false},window)
+    round(sheen,17)
+    create("UIGradient",{Rotation=90,Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,0.88),NumberSequenceKeypoint.new(0.4,0.97),NumberSequenceKeypoint.new(1,1)})},sheen)
+    local pool=create("Frame",{Name="GlassPool",Position=UDim2.fromScale(0.04,0.74),Size=UDim2.fromScale(0.82,0.6),
+        BackgroundColor3=Color3.fromRGB(123,180,249),BorderSizePixel=0,Active=false,Selectable=false},window)
+    round(pool,200)
+    create("UIGradient",{Rotation=-35,Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,0.99),NumberSequenceKeypoint.new(0.55,0.93),NumberSequenceKeypoint.new(1,0.99)})},pool)
+    G.layers={inset,sheen,pool}
+    function G.Refresh()
+        local glass=cfg.theme=="Glass"
+        for _,layer in ipairs(G.layers) do if layer.Visible~=glass then layer.Visible=glass end end
+        edgeGradient.Enabled=glass
+        border.Color=glass and accent:Lerp(Color3.new(1,1,1),0.68) or Color3.fromRGB(65,52,70)
+        border.Transparency=glass and 0.18 or 0.25
+        border.Thickness=glass and 1.2 or 1
+        windowGradient.Color=glass and G.glassGradient or G.normalGradient
+        for name,n in pairs(navs) do
+            local selected=state.page==name
+            n.button.BackgroundTransparency=selected and (glass and 0.72 or 0.65) or 1
+            n.stroke.Transparency=selected and (glass and 0.18 or 0.25) or 1
+            if glass then n.stroke.Color=accent:Lerp(Color3.new(1,1,1),0.5) end
+        end
+    end
+end
 local rail=themed(create("Frame",{Name="Sidebar",Size=UDim2.new(0,54,1,0),BorderSizePixel=0,BackgroundTransparency=0.3},window),"BackgroundColor3","card")
-surface(rail,0.3)
+surface(rail,0.3,0.68)
 local brand=button(rail,"HV",13,{Name="Brand",Size=UDim2.fromOffset(32,30),Position=UDim2.fromOffset(11,12),Font=Enum.Font.GothamBold})
 accented(brand,"TextColor3")
 local heading=text(window,"02 / COMBAT",10,{Name="PageTitle",Position=UDim2.fromOffset(70,13),Size=UDim2.new(1,-200,0,16),Font=Enum.Font.GothamBold})
@@ -473,6 +510,7 @@ local fpsLabel=text(window,"-- FPS",9,{Name="FPS",Position=UDim2.new(1,-90,1,-23
 API.UI={FloatingHost=create("CanvasGroup",{Name="FloatingHost",Position=UDim2.new(0,9,0.36,-3),Size=UDim2.fromOffset(48,48),
     BackgroundTransparency=1,GroupTransparency=1,Visible=false,ZIndex=20},gui)}
 local floating=button(API.UI.FloatingHost,"HV",13,{Name="FloatingButton",Position=UDim2.fromOffset(3,3),Size=UDim2.fromOffset(42,42),ZIndex=20,Font=Enum.Font.GothamBold})
+surface(floating,0,0.24)
 accented(floating,"TextColor3"); accented(create("UIStroke",{Thickness=1,Transparency=0.4},floating),"Color")
 local flightPad=create("Frame",{Name="FlightControls",Position=UDim2.new(1,-66,0.5,-45),Size=UDim2.fromOffset(50,96),BackgroundTransparency=1,Visible=false},gui)
 local flyUp=button(flightPad,"+",22,{Name="FlyUp",Size=UDim2.fromOffset(44,42)})
@@ -735,8 +773,8 @@ local function selectPage(name)
     for key,p in pairs(pages) do p.root.Visible=key==name end
     heading.Text=string.format("%02d / %s",pages[name].number,string.upper(name))
     for key,n in pairs(navs) do
-        n.button.BackgroundTransparency=key==name and 0.65 or 1
-        n.stroke.Transparency=key==name and 0.25 or 1
+        n.button.BackgroundTransparency=key==name and (cfg.theme=="Glass" and 0.72 or 0.65) or 1
+        n.stroke.Transparency=key==name and (cfg.theme=="Glass" and 0.18 or 0.25) or 1
         n.marker.Visible=key==name
     end
     -- Fade text only: avoids CanvasGroup render textures on low-memory phones.
@@ -767,10 +805,11 @@ create("ImageLabel",{Name="Avatar",Image="rbxthumb://type=AvatarHeadShot&id="..p
 local function card(parent,title,key,description)
     local f=themed(create("Frame",{Name=key or title,Size=UDim2.new(1,0,0,36),AutomaticSize=Enum.AutomaticSize.None,
         BorderSizePixel=0,BackgroundTransparency=0.3,ClipsDescendants=true},parent),"BackgroundColor3","card")
-    round(f,6)
-    surface(f,0.3)
+    round(f,11)
+    surface(f,0.3,0.64)
     local stroke=accented(create("UIStroke",{Thickness=0.8,Transparency=0.95},f),"Color")
-    create("UIGradient",{Rotation=18,Color=ColorSequence.new(Color3.fromRGB(200,188,216),Color3.fromRGB(255,245,240))},f)
+    create("UIGradient",{Rotation=105,Color=ColorSequence.new(Color3.fromRGB(248,253,255),Color3.fromRGB(154,182,215)),
+        Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,0),NumberSequenceKeypoint.new(0.52,0.2),NumberSequenceKeypoint.new(1,0)})},f)
     local top=button(f,"",12,{Name="Header",Size=UDim2.new(1,0,0,36),BackgroundTransparency=1})
     local label=text(top,title,11,{Position=UDim2.fromOffset(10,7),Size=UDim2.new(1,-84,0,22),Font=Enum.Font.GothamBold})
     local expand=button(top,"+",14,{Name="Expand",Position=UDim2.new(1,-69,0,8),Size=UDim2.fromOffset(19,20),BackgroundTransparency=0.6})
@@ -804,22 +843,31 @@ local function card(parent,title,key,description)
         local function redraw(value,instant)
             local change=instant and function(o,p) for k,v in pairs(p) do o[k]=v end end or tween
             change(knob,{Position=UDim2.fromOffset(value and 16 or 2,2),BackgroundColor3=value and accent or colors.muted})
-            change(toggle,{BackgroundColor3=value and accent:Lerp(colors.card,0.65) or Color3.fromRGB(60,54,70)})
-            change(stroke,{Transparency=value and 0.5 or 0.95})
+            local glass=cfg.theme=="Glass"
+            change(toggle,{BackgroundColor3=value and accent:Lerp(colors.card,0.65) or (glass and Color3.fromRGB(65,85,108) or Color3.fromRGB(60,54,70))})
+            change(stroke,{Transparency=glass and (value and 0.28 or 0.76) or (value and 0.5 or 0.95)})
+            stroke.Color=glass and accent:Lerp(Color3.new(1,1,1),0.58) or accent
             change(f,{BackgroundColor3=value and accent:Lerp(colors.card,0.88) or colors.card})
             label.TextColor3=value and colors.text or colors.muted
         end
         watch(key,redraw)
         accentRefreshers[#accentRefreshers+1]={pageOf(f),function() redraw(cfg[key],true) end}
         listen(toggle.Activated,function() set(key,not cfg[key]) end)
-    else toggle.Visible=false;expand.Position=UDim2.new(1,-29,0,8);label.Size=UDim2.new(1,-46,0,22) end
+    else
+        toggle.Visible=false;expand.Position=UDim2.new(1,-29,0,8);label.Size=UDim2.new(1,-46,0,22)
+        local function edge()
+            stroke.Transparency=cfg.theme=="Glass" and 0.76 or 0.95
+            stroke.Color=cfg.theme=="Glass" and accent:Lerp(Color3.new(1,1,1),0.58) or accent
+        end
+        edge();accentRefreshers[#accentRefreshers+1]={pageOf(f),edge}
+    end
     return content,expandCard,f
 end
 local function checkbox(parent,label,key)
     optionLabels[key]=label
     local b=button(parent,label,10,{Name=key,Size=UDim2.new(1,0,0,23),BackgroundTransparency=1,TextXAlignment=Enum.TextXAlignment.Left})
     local mark=button(b,"",9,{Position=UDim2.new(1,-18,0,4),Size=UDim2.fromOffset(14,14),BackgroundTransparency=0.4})
-    local function update(v) mark.Text=v and "+" or "";mark.BackgroundColor3=v and accent or Color3.fromRGB(58,51,65) end
+    local function update(v) mark.Text=v and "+" or "";mark.BackgroundColor3=v and accent or (cfg.theme=="Glass" and Color3.fromRGB(65,85,108) or Color3.fromRGB(58,51,65)) end
     watch(key,update)
     accentRefreshers[#accentRefreshers+1]={pageOf(b),function() update(cfg[key]) end}
     local function toggle() set(key,not cfg[key]) end
@@ -835,7 +883,7 @@ local function slider(parent,label,key,min,max,step,unit)
     local pg=pageOf(value);if pg then pages[pg.Name].texts[#pages[pg.Name].texts+1]=value end
     accented(value,"TextColor3")
     local hit=button(f,"",10,{Name="SliderInput",Position=UDim2.fromOffset(0,18),Size=UDim2.new(1,0,0,18),BackgroundTransparency=1})
-    local track=create("Frame",{Name="Track",Position=UDim2.fromOffset(0,7),Size=UDim2.new(1,0,0,4),BackgroundColor3=Color3.fromRGB(64,53,68),BorderSizePixel=0},hit)
+    local track=themed(create("Frame",{Name="Track",Position=UDim2.fromOffset(0,7),Size=UDim2.new(1,0,0,4),BorderSizePixel=0},hit),"BackgroundColor3","track")
     round(track,4)
     local fill=accented(create("Frame",{Name="Fill",Size=UDim2.fromScale(0,1),BorderSizePixel=0},track),"BackgroundColor3"); round(fill,5)
     local knob=create("Frame",{Name="Knob",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(1,0.5),Size=UDim2.fromOffset(6,6),BackgroundColor3=colors.text,BorderSizePixel=0},fill);round(knob,9)
@@ -1111,7 +1159,7 @@ c=card(right,"Playback",nil);actionButton(c,"Stop Emote",function() API.StopEmot
 left,right=page("Config",10)
 local customizeExpand
 c,customizeExpand=card(left,"Customize UI",nil,"Cores, transparencia e escala. A interface se ajusta ao tamanho da tela.")
-slider(c,"Escala do menu","uiScale",0.45,1.6,0.05,"x");cycle(c,"Theme","theme",{"Dark","Black"})
+slider(c,"Escala do menu","uiScale",0.45,1.6,0.05,"x");cycle(c,"Theme","theme",{"Glass","Dark","Black"})
 slider(c,"Transparencia","transparency",0,85,1,"%");checkbox(c,"Notificacoes","notifications");checkbox(c,"Sound Effects","sounds")
 cycle(c,"Accent Color","accent",{"Peach","Purple","Blue","Pink","Green"});checkbox(c,"Rainbow Accent","rainbow")
 customizeExpand()
@@ -1217,11 +1265,17 @@ refreshAccent=function()
     if not state.visible then return end
     for _,entry in ipairs(accentItems) do if entry[1].Parent and (not entry[3] or entry[3].Visible) then entry[1][entry[2]]=accent end end
     for _,entry in ipairs(accentRefreshers) do if not entry[1] or entry[1].Visible then entry[2]() end end
+    if API.Glass then API.Glass.Refresh() end
 end
 refreshTheme=function()
-    colors.bg=cfg.theme=="Black" and Color3.fromRGB(7,7,10) or Color3.fromRGB(16,14,23)
-    colors.card=cfg.theme=="Black" and Color3.fromRGB(20,19,25) or Color3.fromRGB(27,23,36)
+    local glass=cfg.theme=="Glass"
+    colors.bg=glass and Color3.fromRGB(17,29,45) or (cfg.theme=="Black" and Color3.fromRGB(7,7,10) or Color3.fromRGB(16,14,23))
+    colors.card=glass and Color3.fromRGB(39,58,81) or (cfg.theme=="Black" and Color3.fromRGB(20,19,25) or Color3.fromRGB(27,23,36))
+    colors.text=glass and Color3.fromRGB(239,247,255) or Color3.fromRGB(235,232,240)
+    colors.muted=glass and Color3.fromRGB(174,194,216) or Color3.fromRGB(147,140,158)
+    colors.track=glass and Color3.fromRGB(65,86,111) or Color3.fromRGB(64,53,68)
     for _,entry in ipairs(themes) do if entry[1].Parent then entry[1][entry[2]]=colors[entry[3]] end end
+    if API.Glass then API.Glass.Refresh() end
     refreshAccent();applyAppearance()
 end
 local clickSound=create("Sound",{Name="UITick",SoundId="rbxasset://sounds/electronicpingshort.wav",Volume=0.15},gui)

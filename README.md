@@ -1,6 +1,18 @@
 # Huss Valley Panel
 
-Versão 0.6.33 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.34 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Tema Glass na versão 0.6.34
+
+A interface recebeu um tema inspirado em Liquid Glass: vidro escuro com azul frio, superfícies translúcidas, contorno iluminado, brilho superior e uma reflexão suave na borda inferior. A janela continua compacta, com o mesmo tamanho, posição, duas colunas e controles. Os cantos de janela, cartões e botões foram arredondados; trilhos e estados dos controles receberam cores compatíveis com o tema.
+
+Use o **mesmo loader** e confira **v0.6.34**. Em **Config → Customize UI → Theme**, selecione **Glass**. É o padrão das sessões sem perfil carregado, com Accent Blue e transparência 18%. Perfis antigos que escolheram Dark, Black, outra cor ou transparência continuam preservando esses valores; selecione Glass manualmente para mudar o perfil. Dark e Black permanecem disponíveis.
+
+O efeito é uma aproximação visual em GUI 2D. Não implementa refração física nem desfoque do cenário. As três camadas decorativas usam Frames, cantos, UIStroke e UIGradient estáticos, posicionados atrás dos controles, com Active/Selectable desativados. As cores e o estado da decoração são atualizados pelo fluxo existente de abertura, tema, seleção de página e Accent, incluindo o Rainbow opcional. A mudança não adiciona callbacks de renderização, Heartbeat, tarefas agendadas ou conexões de entrada. Não há novas imagens, vídeo, downloads ou bibliotecas de interface.
+
+A fórmula de transparência de Glass mantém uma base própria de vidro; o controle existente aumenta a transparência global. Dark e Black mantêm suas bases anteriores. Superfícies em páginas ocultas continuam sendo ignoradas nas atualizações de aparência. A decoração é ocultada ao sair de Glass e reutilizada ao voltar, sem recriar os objetos.
+
+Validação: sintaxe inteira; verificações anteriores de agendamento, limpeza e perfis; cinco casos da decoração/transparência/seleção de Glass; e validação real dos três temas. Confirmado por comparação integral que os controladores de personagem, câmera, Mobilador, Lock On, ESP, ações, perfis e agendamento permaneceram idênticos à v0.6.33, assim como as ações flutuantes. A apresentação nativa e o custo real no telefone ainda precisam ser conferidos no Roblox/Delta.
 
 ## Remoção de mídia e trabalho ocioso na versão 0.6.33
 
