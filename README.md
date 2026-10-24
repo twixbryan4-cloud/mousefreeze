@@ -1,6 +1,20 @@
 # Huss Valley Panel
 
-Versão 0.6.31 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.32 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Vídeo por ID do Roblox na versão 0.6.32
+
+O teste comparativo real em **Delta 1.1.743.1136 / Roblox 2.743.1136** confirmou reprodução do asset público `5608384572`: IsLoaded true, resolução 1280×720, duração 10 s, TimePosition 0,047 s após cerca de 0,645 s e fetchStatus Success. O controle local VP8 de um segundo teve seus bytes escritos e relidos corretamente, mas falhou por timeout de 15 s, com `Failed to load`, duração/resolução zero e fetchStatus None. Isso isola a diferença ao caminho local daquele controle, sem demonstrar a causa interna do Delta ou incompatibilidade universal de arquivos locais. **O teste ocorreu em PlayerGui, com sameParentAsPanel false**; não comprova a mesma reprodução no host atual do painel.
+
+Em **Config → Video de fundo**, o formato **Roblox (ID)** e o campo **ID do video Roblox** aceitam um número ou `rbxassetid://ID`, normalizam o valor para texto numérico e salvam nos perfis. URLs arbitrárias, zero, valores negativos e entradas inválidas são recusados. Esse modo fornece o URI diretamente ao VideoFrame e dispensa writefile, getcustomasset e downloads locais do painel. O asset continua dependendo do acesso permitido pelo Roblox.
+
+**Testar video Roblox** escolhe explicitamente o asset público do teste, ativa o vídeo e inicia no fundo do próprio painel. O campo passa a mostrar `5608384572`; é um clipe de demonstração, não o vídeo original do usuário. Use o mesmo loader e confira **v0.6.32**. Após tocar no botão, mantenha o painel aberto e copie seu diagnóstico se não houver reprodução após 15 segundos. A confirmação no host do painel ainda depende desse teste real.
+
+O modo por ID obtém as dimensões da resolução nativa reportada pelo player, preserva a proporção nos modos Inteiro/Preencher e não inventa FPS para vídeos do Roblox. Loaded e avanço de TimePosition continuam necessários para confirmar reprodução. A mudança de ID invalida callbacks antigos. Os formatos locais e seus arquivos, qualidade, padrões e opções permanecem intactos; a publicação não seleciona outro vídeo automaticamente.
+
+O vídeo particular ainda precisa ter um ID de vídeo Roblox e permissões para o contexto de uso. A [documentação de vídeo](https://create.roblox.com/docs/ui/video-frames) informa taxa de **2.000 Robux por upload** e as [regras de acesso a ativos](https://create.roblox.com/docs/projects/assets/privacy) precisam ser verificadas antes de considerar esse caminho para jogos de terceiros. Um upload pago, por si só, não garante acesso em qualquer experiência. Esta mudança não realizou upload, compra ou alteração de permissões.
+
+Validação: sintaxe completa, **32 casos simulados** do controlador e teste da função real de validação de configuração. Inclui os 26 casos anteriores, execução por ID sem APIs de arquivo, ID ausente, geometria pelas dimensões nativas, metadados de FPS desconhecidos, callbacks atrasados, botão de demonstração e timeout sem recomendar novamente o caminho local. As regiões externas ao controlador/configurações/UI de vídeo foram comparadas com a v0.6.31. O restante do painel não foi alterado. A reprodução no Android dentro do painel ainda não foi confirmada.
 
 ## Teste comparativo separado de vídeo
 

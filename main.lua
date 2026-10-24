@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.31
+-- Huss Valley Panel 0.6.32
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -33,7 +33,7 @@ local defaults = {
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
     autoRevive=false, autoPick=false, promptDelay=0.6,
     chessAssistant=false,
-    videoBackground=true,videoFormat="Original",videoFit="Inteiro",videoShade=25,videoVolume=0,
+    videoBackground=true,videoFormat="Original",videoFit="Inteiro",videoShade=25,videoVolume=0,videoAssetId="",
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
     autoAbility=false, dashSide="Right",dashRange=15,dashDelay=1,dashKey="Q",dashKeyboardFallback=false,tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
     autoVote=false, disableGameAFK=false, antiIdle=false, antiHit=false,
@@ -56,7 +56,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.31", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.32", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -360,7 +360,14 @@ local function valid(key,value,keyContext)
     elseif key=="accent" and not palette[value] then return false
     elseif key=="dashSide" and value~="Right" and value~="Left" then return false
     elseif key=="lockMode" and value~="Console" and value~="Classico" then return false
-    elseif key=="videoFormat" and value~="Original" and value~="WebM HQ" and value~="WebM 720p" then return false
+    elseif key=="videoFormat" and value~="Original" and value~="WebM HQ" and value~="WebM 720p" and value~="Roblox (ID)" then return false
+    elseif key=="videoAssetId" then
+        value=value:match("^%s*(.-)%s*$")
+        if value~="" then
+            local id=value:match("^rbxassetid://(%d+)$") or value:match("^(%d+)$")
+            if not id or #id>20 or not id:find("[1-9]") then return false end
+            value=id:gsub("^0+","")
+        end
     elseif key=="videoFit" and value~="Inteiro" and value~="Preencher" then return false
     elseif key=="mobiladorRightMode" and value~="Segurar" and value~="Alternar" and value~="Desligado" then return false
     elseif key=="mobiladorCursorScope" and value~="Sempre" and value~="So na captura" then return false
@@ -572,7 +579,7 @@ do
         local frame=V.frame;if not frame then return end
         local size=API.VideoHost.AbsoluteSize;local w,h=size.X,size.Y
         if w<=0 or h<=0 then return end
-        local asset=V.asset or {};local width,height=asset.width or 1440,asset.height or 1080
+        local asset=V.asset or {};local width,height=asset.width or (asset.native and 16 or 1440),asset.height or (asset.native and 9 or 1080)
         local scaleFactor=(cfg.videoFit=="Inteiro" and math.min or math.max)(w/width,h/height)
         frame.Size=UDim2.fromScale(width*scaleFactor/w,height*scaleFactor/h)
         frame.Volume=cfg.videoVolume/100
@@ -638,12 +645,18 @@ do
         V.FetchStatus()
         if not frame.IsLoaded then
             if now-V.loadAt>=12 then
-                local hint=cfg.videoFormat=="WebM 720p" and "copie o diagnostico" or "tente WebM 720p"
+                local hint=(cfg.videoFormat=="WebM 720p" or cfg.videoFormat=="Roblox (ID)") and "copie o diagnostico" or "tente WebM 720p"
                 V.Fail("Video nao carregou / "..cfg.videoFormat.."; "..hint,"nativeLoad")
             end
             return
         end
         V.loaded=true
+        if V.asset and V.asset.native then
+            local resolution=V.Resolution(frame)
+            if resolution and resolution.x>0 and resolution.y>0 and (V.asset.width~=resolution.x or V.asset.height~=resolution.y) then
+                V.asset.width=resolution.x;V.asset.height=resolution.y;V.Fit()
+            end
+        end
         if not V.startedAt then
             V.startedAt=now;V.timeBase=frame.TimePosition;frame:Play()
             V.Status("Confirmando reproducao / "..cfg.videoFormat);return
@@ -652,7 +665,11 @@ do
         if position>V.timeBase+0.02 or position<V.timeBase-0.02 then
             V.verified=true;frame.Visible=true;API.VideoHost.Visible=true
             local asset=V.asset or {}
-            V.Status("Reproduzindo / "..(asset.width or 1440).."x"..(asset.height or 1080).." / fonte "..(asset.fps or 60).." FPS / "..cfg.videoFormat);V.Unwatch()
+            if asset.native then
+                local dimensions=asset.width and (" / "..asset.width.."x"..asset.height) or ""
+                V.Status("Reproduzindo / Roblox (ID)"..dimensions)
+            else V.Status("Reproduzindo / "..(asset.width or 1440).."x"..(asset.height or 1080).." / fonte "..(asset.fps or 60).." FPS / "..cfg.videoFormat) end
+            V.Unwatch()
         elseif now-V.startedAt>=4 then V.Fail("Video carregou mas nao reproduziu; copie o diagnostico","nativePlayback") end
     end
     function V.Watch()
@@ -678,9 +695,13 @@ do
     end
     function V.Attach(path,asset,generation)
         if generation~=V.generation or not state.alive or not cfg.videoBackground then return end
-        local register=type(getcustomasset)=="function" and getcustomasset or type(getsynasset)=="function" and getsynasset or env.getcustomasset
-        assert(type(register)=="function","getcustomasset indisponivel")
-        local source=register(path);assert(type(source)=="string" and source~="","Registro de video falhou")
+        local source
+        if asset.native then source="rbxassetid://"..asset.id
+        else
+            local register=type(getcustomasset)=="function" and getcustomasset or type(getsynasset)=="function" and getsynasset or env.getcustomasset
+            assert(type(register)=="function","getcustomasset indisponivel")
+            source=register(path);assert(type(source)=="string" and source~="","Registro de video falhou")
+        end
         -- Parent first, then assign Video: avoids the native pre-parent initialization bug.
         local frame=create("VideoFrame",{Name="PanelVideo",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),
             Size=UDim2.fromScale(1,1),BackgroundTransparency=1,Looped=true,Playing=false,Volume=cfg.videoVolume/100,
@@ -719,16 +740,25 @@ do
             return
         end
         if V.job then V.Status("Aguardando transferencia do video");return end
-        local asset=V.catalog[cfg.videoFormat];assert(asset,"Formato indisponivel")
+        local asset=V.catalog[cfg.videoFormat]
+        if cfg.videoFormat=="Roblox (ID)" then
+            local id=cfg.videoAssetId
+            if type(id)~="string" or not id:match("^%d+$") or #id>20 or not id:find("[1-9]") then
+                V.failed=true;V.Status("Informe um ID de video Roblox ou use Testar video Roblox");return
+            end
+            asset={native=true,id=id}
+        end
+        assert(asset,"Formato indisponivel")
         local generation=V.generation;local job={};V.job=job
-        V.Status("Preparando "..cfg.videoFormat.." / download somente sem cache")
+        V.Status(asset.native and "Preparando video Roblox / ID informado" or ("Preparando "..cfg.videoFormat.." / download somente sem cache"))
         job.thread=task.defer(function()
             if generation~=V.generation or not V.Wanted() then
                 if V.job==job then V.job=nil end
                 if V.Wanted() then V.Sync() end
                 return
             end
-            local ok,result=pcall(V.Fetch,asset)
+            local ok,result=true,nil
+            if not asset.native then ok,result=pcall(V.Fetch,asset) end
             if V.job==job then V.job=nil end
             if not state.alive then return end
             if generation~=V.generation then if V.Wanted() then V.Sync() end;return end
@@ -742,15 +772,25 @@ do
         V.nativeError=nil;V.fetchStatus=nil;V.failureStage=nil;V.Sync()
     end
     function V.Stop() V.Drop();V.Status("Video desligado") end
+    function V.TestRoblox()
+        set("videoAssetId","5608384572",true)
+        set("videoFormat","Roblox (ID)",true)
+        set("videoBackground",true,true)
+        V.Reload()
+    end
     function V.Snapshot()
         local frame=V.frame
         local last=V.lastPlayback or {};local resolution=V.Resolution(frame) or last.nativeResolution
         local asset=V.catalog[cfg.videoFormat] or {}
+        local native=cfg.videoFormat=="Roblox (ID)"
+        local width,height,fps=asset.width or 1440,asset.height or 1080,asset.fps or 60
+        if native then width=resolution and resolution.x or 0;height=resolution and resolution.y or 0;fps=nil end
         return {kind="PanelVideoDiagnostics",version=API.Version,enabled=cfg.videoBackground,format=cfg.videoFormat,
             message=V.message,lastError=V.lastError,lastPlayback=V.lastPlayback,visible=window.Visible,busy=V.job~=nil,
             loaded=frame and frame.IsLoaded or false,playing=frame and frame.Playing or false,verified=V.verified,
             timePosition=frame and frame.TimePosition or 0,timeLength=frame and frame.TimeLength or 0,
-            sourceWidth=asset.width or 1440,sourceHeight=asset.height or 1080,sourceFPS=asset.fps or 60,fit=cfg.videoFit,
+            sourceWidth=width,sourceHeight=height,sourceFPS=fps,fit=cfg.videoFit,
+            sourceType=native and "robloxAsset" or "localFile",assetId=native and cfg.videoAssetId or nil,
             focused=V.focused,active=V.active,booting=state.booting,watching=V.watch~=nil,probeCount=V.probes,
             loadAge=frame and math.max(0,os.clock()-V.loadAt) or last.loadAge,
             frameVisible=frame and frame.Visible or false,hostVisible=API.VideoHost.Visible,
@@ -760,6 +800,7 @@ do
     end
     actions.videoBackground=function(enabled) if enabled then V.Reload() else V.Stop() end end
     actions.videoFormat=V.Reload;actions.videoFit=V.Fit;actions.videoShade=V.Fit;actions.videoVolume=V.Fit
+    actions.videoAssetId=function() if cfg.videoFormat=="Roblox (ID)" then V.Reload() end end
     listen(window:GetPropertyChangedSignal("Visible"),V.Sync)
     listen(API.VideoHost:GetPropertyChangedSignal("AbsoluteSize"),V.Fit)
     listen(Input.WindowFocusReleased,function() V.focused=false;V.Sync() end)
@@ -1342,8 +1383,16 @@ slider(c,"Transparencia","transparency",0,85,1,"%");checkbox(c,"Notificacoes","n
 cycle(c,"Accent Color","accent",{"Peach","Purple","Blue","Pink","Green"});checkbox(c,"Rainbow Accent","rainbow")
 customizeExpand()
 do
-    local content=card(left,"Video de fundo","videoBackground","Original e WebM HQ: 1440x1080, 60 FPS. WebM 720p: 960x720, 60 FPS, para testar compatibilidade. A opcao 720p reduz a resolucao; selecione para testar.")
-    cycle(content,"Formato","videoFormat",{"Original","WebM HQ","WebM 720p"})
+    local content=card(left,"Video de fundo","videoBackground","Original e WebM HQ: 1080p; WebM 720p reduz a resolucao. Roblox (ID) usa um video hospedado no Roblox. Testar video Roblox seleciona o clipe publico de demonstracao.")
+    cycle(content,"Formato","videoFormat",{"Original","WebM HQ","WebM 720p","Roblox (ID)"})
+    local idBox=create("TextBox",{Name="VideoAssetId",Text=cfg.videoAssetId,PlaceholderText="ID do video Roblox",ClearTextOnFocus=false,
+        Size=UDim2.new(1,0,0,28),TextSize=10,Font=Enum.Font.Code,TextColor3=colors.text,BackgroundColor3=colors.card},content)
+    round(idBox,5);surface(idBox,0)
+    watch("videoAssetId",function(value) idBox.Text=value end)
+    listen(idBox.FocusLost,function()
+        if not set("videoAssetId",idBox.Text) then idBox.Text=cfg.videoAssetId;notify("Use um ID numerico ou rbxassetid://ID de video.") end
+    end)
+    actionButton(content,"Testar video Roblox",function() if API.VideoBackground then API.VideoBackground.TestRoblox() end end)
     cycle(content,"Proporcao","videoFit",{"Inteiro","Preencher"})
     slider(content,"Escurecer video","videoShade",0,85,1,"%")
     slider(content,"Volume do video","videoVolume",0,100,1,"%")
