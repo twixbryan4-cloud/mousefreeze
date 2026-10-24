@@ -1,6 +1,18 @@
 # Huss Valley Panel
 
-Versão 0.6.29 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.30 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Inicialização do vídeo na versão 0.6.30
+
+O diagnóstico da v0.6.29 mostrou `loaded=false`, `timeLength=0`, `timePosition=0`, sem transferência em andamento. Isso situa a espera no carregamento nativo, mas não comprova, sozinho, incompatibilidade permanente com o formato nem falha no temporizador: o relatório não registrava há quantos segundos o player estava nessa etapa.
+
+A fonte agora só é atribuída **depois** que o VideoFrame tem parent e seu evento Loaded está conectado. A inicialização anterior atribuía Video dentro do construtor genérico, antes de Parent. Essa ordem está relacionada a um [problema confirmado pela equipe do Roblox](https://devforum.roblox.com/t/videoframe-does-not-play-no-matter-what/3905848), cuja orientação é atribuir Video após a inclusão na interface. A ligação continua no mesmo host do painel; o efeito sobre arquivos locais do Delta ainda requer confirmação no aparelho.
+
+Ao abrir o painel, o player e o host ficam visíveis e recebem Play sem esperar IsLoaded. Isso remove a dependência anterior entre carregar, iniciar e tornar o player visível. Visibilidade ou Playing, por si só, continuam sem significar sucesso: a mensagem Reproduzindo exige IsLoaded e avanço real do tempo. Fechar ou perder foco pausa e oculta o player. Reabrir exige nova confirmação de avanço. Reaplicar a sincronização durante uma espera ativa não reinicia o prazo de 12 segundos; esse prazo só reinicia em uma ativação ou tentativa explícita nova.
+
+O diagnóstico acrescenta tempo desde a ativação (`loadAge`), foco, estado ativo, observador (`watching`), número de verificações (`probeCount`), visibilidade do frame/host, esquema retornado pelo registro, bytes do arquivo, uso do cache e resolução nativa quando disponível. Nenhuma URL pessoal é exportada. Para testar: use o mesmo loader, confira v0.6.30 e **Tentar carregar video**; mantenha o painel aberto por 15 segundos. Se não tocar, copie o diagnóstico; teste também WebM HQ. O MP4 original e o WebM anteriores permanecem intactos, com a mesma resolução e cadência.
+
+Validação local: sintaxe completa, **19 casos simulados** do controlador, incluindo ordem de atribuição/parent, evento conectado antes da fonte, decoder que só carrega visível e com Play solicitado, prazo não prorrogado por Sync repetido e resultados atrasados com painel fechado. O código fora do controlador foi comparado integralmente com a v0.6.29, descontando a versão. A correção dessa sequência não garante que o decoder do Delta aceite arquivos locais.
 
 ## Vídeo de fundo na versão 0.6.29
 

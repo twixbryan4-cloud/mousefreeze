@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.29
+-- Huss Valley Panel 0.6.30
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -56,7 +56,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.29", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.30", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -535,7 +535,7 @@ end
 
 -- Native background video. Playback is confirmed by advancing media time, not Playing alone.
 do
-    local V={generation=0,focused=true,message="Aguardando abrir o painel"}
+    local V={generation=0,focused=true,probes=0,message="Aguardando abrir o painel"}
     API.VideoBackground=V
     V.catalog={
         ["Original"]={bytes=17413442,extension="mp4",hash="390b9da02d00",parts={{url="https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/d87aa218d401ff7cffb11e798f6e82eccd08f358/media/panel-390b9da02d00.mp4.part1",bytes=10485744},{url="https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/d87aa218d401ff7cffb11e798f6e82eccd08f358/media/panel-390b9da02d00.mp4.part2",bytes=6927698}}},
@@ -565,7 +565,7 @@ do
         if V.loadedConnection then V.loadedConnection:Disconnect();V.loadedConnection=nil end
         if V.frame then pcall(V.frame.Pause,V.frame);V.frame:Destroy();V.frame=nil end
         if V.shade then V.shade:Destroy();V.shade=nil end
-        V.startedAt=nil;V.verified=false;V.loaded=false;V.failed=false
+        V.startedAt=nil;V.active=false;V.verified=false;V.loaded=false;V.failed=false
         API.VideoHost.Visible=false
     end
     function V.Fail(message)
@@ -585,9 +585,10 @@ do
         local path="HussPanelVideo_"..asset.hash.."."..asset.extension
         if type(isfile)=="function" and type(readfile)=="function" and isfile(path) then
             local ok,body=pcall(readfile,path)
-            if ok and V.ValidBytes(body,asset) then return path end
+            if ok and V.ValidBytes(body,asset) then V.cacheHit=true;V.fileBytes=#body;return path end
         end
         assert(type(writefile)=="function","writefile indisponivel")
+        V.cacheHit=false;V.fileBytes=nil
         local chunks={}
         local fetch=type(request)=="function" and request or type(http_request)=="function" and http_request or nil
         for index,part in ipairs(asset.parts) do
@@ -602,13 +603,14 @@ do
         end
         local body=table.concat(chunks)
         assert(V.ValidBytes(body,asset),"Formato/arquivo de video invalido")
-        writefile(path,body)
+        writefile(path,body);V.fileBytes=#body
         return path
     end
     function V.Probe()
         local frame=V.frame;if not frame then return end
+        V.probes=V.probes+1
         if not V.Wanted() then
-            V.Unwatch();pcall(frame.Pause,frame);V.startedAt=nil;API.VideoHost.Visible=false;V.Status("Video pausado");return
+            V.Unwatch();pcall(frame.Pause,frame);V.startedAt=nil;V.active=false;API.VideoHost.Visible=false;V.Status("Video pausado");return
         end
         local now=os.clock()
         if not frame.IsLoaded then
@@ -640,10 +642,12 @@ do
         local register=type(getcustomasset)=="function" and getcustomasset or type(getsynasset)=="function" and getsynasset or env.getcustomasset
         assert(type(register)=="function","getcustomasset indisponivel")
         local source=register(path);assert(type(source)=="string" and source~="","Registro de video falhou")
+        -- Parent first, then assign Video: avoids the native pre-parent initialization bug.
         local frame=create("VideoFrame",{Name="PanelVideo",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),
             Size=UDim2.fromScale(1,1),BackgroundTransparency=1,Looped=true,Playing=false,Volume=cfg.videoVolume/100,
-            Video=source,Visible=false,ZIndex=1},API.VideoHost)
-        V.frame=frame;V.asset=asset;V.path=path;V.loadAt=os.clock();V.startedAt=nil;V.verified=false
+            Visible=true,ZIndex=1},API.VideoHost)
+        V.frame=frame;V.asset=asset;V.path=path;V.loadAt=os.clock();V.startedAt=nil;V.verified=false;V.active=false;V.probes=0
+        V.registrationScheme=source:match("^([%w+%.%-]+):") or "sem esquema"
         round(frame,11)
         V.shade=create("Frame",{Name="ReadabilityShade",Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.new(0,0,0),
             BackgroundTransparency=1-cfg.videoShade/100,BorderSizePixel=0,ZIndex=2},API.VideoHost)
@@ -653,17 +657,26 @@ do
             if V.Wanted() then V.Watch() end
         end)
         V.Status("Carregando video / "..cfg.videoFormat)
-        if V.Wanted() then V.Watch();V.Probe() end
+        frame.Video=source
+        V.Sync()
     end
     function V.Sync()
         if not V.Wanted() then
             V.Unwatch();if V.frame then pcall(V.frame.Pause,V.frame) end
-            V.startedAt=nil;API.VideoHost.Visible=false
+            V.startedAt=nil;V.active=false;API.VideoHost.Visible=false
             V.Status(cfg.videoBackground and "Video pausado" or "Video desligado");return
         end
         if V.failed then return end
         if V.frame then
-            V.Fit();V.loadAt=os.clock();V.startedAt=nil;V.Watch();V.Probe();return
+            V.Fit()
+            if not V.active then
+                V.active=true;V.loadAt=os.clock();V.startedAt=nil;V.verified=false
+                V.frame.Visible=true;API.VideoHost.Visible=true
+                -- Start the native request without gating visibility or Play on IsLoaded.
+                V.frame:Play()
+            end
+            if not V.verified then V.Watch();V.Probe() end
+            return
         end
         if V.job then V.Status("Aguardando transferencia do video");return end
         local asset=V.catalog[cfg.videoFormat];assert(asset,"Formato indisponivel")
@@ -684,15 +697,25 @@ do
             if not attached then V.lastError=tostring(err):sub(1,180);V.Fail("Video local nao suportado; copie o diagnostico") end
         end)
     end
-    function V.Reload() V.Drop();V.lastError=nil;V.lastPlayback=nil;V.Sync() end
+    function V.Reload()
+        V.Drop();V.lastError=nil;V.lastPlayback=nil;V.registrationScheme=nil;V.fileBytes=nil;V.cacheHit=nil;V.Sync()
+    end
     function V.Stop() V.Drop();V.Status("Video desligado") end
     function V.Snapshot()
         local frame=V.frame
+        local resolution
+        if frame then
+            pcall(function() local size=frame.Resolution;resolution={x=size.X,y=size.Y} end)
+        end
         return {kind="PanelVideoDiagnostics",version=API.Version,enabled=cfg.videoBackground,format=cfg.videoFormat,
             message=V.message,lastError=V.lastError,lastPlayback=V.lastPlayback,visible=window.Visible,busy=V.job~=nil,
             loaded=frame and frame.IsLoaded or false,playing=frame and frame.Playing or false,verified=V.verified,
             timePosition=frame and frame.TimePosition or 0,timeLength=frame and frame.TimeLength or 0,
             sourceWidth=1440,sourceHeight=1080,sourceFPS=60,fit=cfg.videoFit,
+            focused=V.focused,active=V.active,booting=state.booting,watching=V.watch~=nil,probeCount=V.probes,
+            loadAge=frame and math.max(0,os.clock()-V.loadAt) or nil,
+            frameVisible=frame and frame.Visible or false,hostVisible=API.VideoHost.Visible,
+            registrationScheme=V.registrationScheme,fileBytes=V.fileBytes,cacheHit=V.cacheHit,nativeResolution=resolution,
             writefile=type(writefile)=="function",getcustomasset=type(getcustomasset)=="function" or type(getsynasset)=="function" or type(env.getcustomasset)=="function"}
     end
     actions.videoBackground=function(enabled) if enabled then V.Reload() else V.Stop() end end
