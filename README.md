@@ -1,6 +1,20 @@
 # Huss Valley Panel
 
-Versão 0.6.30 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.31 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Compatibilidade e diagnóstico do vídeo na versão 0.6.31
+
+O teste real da v0.6.30 em WebM HQ terminou com 49 verificações, `loaded=false`, `timeLength=0` e `timePosition=0`. O cache tinha o tamanho esperado de 41.448.021 bytes. A visibilidade falsa do host/player no relatório é consequência da limpeza após o timeout; o estado anterior preservava `playing=true`, que não comprova reprodução. O relatório anterior do Original foi copiado com apenas 0,4 segundo e não confirma o resultado final desse formato na v0.6.30. Não há evidência suficiente para atribuir a falha exclusivamente ao codec, resolução ou registro local.
+
+Foi acrescentado **WebM 720p**, selecionável em **Config → Video de fundo → Formato**, mantendo Original como padrão e os arquivos anteriores intactos. A alternativa usa VP8, Vorbis e yuv420p, **960×720, 4:3, 60 FPS, 723 quadros**, com duração de contêiner de 12,054 s e 13.920.283 bytes. Reduz a resolução e usa compressão com perdas; não é qualidade idêntica ao Original. É uma tentativa de compatibilidade diante de [restrições de resolução registradas no player](https://devforum.roblox.com/t/roblox-videoframes-are-capped-at-1280x720/3901780), não uma confirmação da causa no Delta nem promessa de reprodução. Não há troca automática de formato.
+
+SHA-256 da alternativa: `bd61603df84a3c394f296ff057f95d54ca7bfe2febf508503c5ad518ccd3132a`. Os três arquivos binários estão fixados no commit `4c318ce3a3dd96530db53da5bd819352a89ce861`; cada hash Git foi conferido com os bytes locais. Cache, download único por arquivo e pausa/foco continuam iguais. A proporção e o diagnóstico agora usam as dimensões do formato escolhido.
+
+O diagnóstico preserva tempo de espera, resolução nativa e visibilidade anteriores à limpeza em `lastPlayback`, acrescenta a etapa da falha (`failureStage`) e consulta o estado de busca do ContentProvider quando acessível (`fetchStatus`). **Success na busca não confirma decodificação nem reprodução.** Durante a espera limitada, um observador de logs aceita apenas erros que nomeiem exatamente a fonte atual; mascara o URI e o caminho local e guarda até 240 caracteres em `nativeError`. O observador é removido ao pausar, concluir, falhar, desligar ou destruir. Ausência dessas APIs não impede a tentativa de vídeo. A mensagem de timeout recomenda 720p para os outros formatos e pede o diagnóstico quando 720p também falha.
+
+Para testar: use o mesmo loader, confira **v0.6.31**, escolha **WebM 720p** e mantenha o painel aberto. No primeiro uso há download de aproximadamente 14 MB; depois que aparecer Carregando video, aguarde 15 segundos e copie o diagnóstico se não tocar. O carregamento real no Delta continua pendente de teste no aparelho.
+
+Validação local: sintaxe do arquivo completo e **26 casos simulados**, incluindo todos os 19 casos anteriores e sete casos novos de diagnóstico, isolamento/limpeza de logs, APIs opcionais e formato 720p. Conversão verificada com ffprobe e decodificação completa. Nenhuma medição de desempenho ou reprodução no Android foi realizada. As regiões externas ao controlador de vídeo foram comparadas com a v0.6.30, exceto versão, aceitação do novo formato e texto/seletor da opção de vídeo.
 
 ## Inicialização do vídeo na versão 0.6.30
 
