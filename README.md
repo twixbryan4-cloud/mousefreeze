@@ -1,6 +1,18 @@
 # Huss Valley Panel
 
-Versão 0.6.28 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.29 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Vídeo de fundo na versão 0.6.29
+
+Use o mesmo loader e abra **Config → Video de fundo**. O MP4 recebido foi mantido byte a byte, em **1440×1080, 4:3, 60 FPS**, com 723 quadros. O arquivo fornecido não contém 120 FPS. O padrão **Original** usa esse arquivo; **WebM HQ** é uma alternativa explicitamente selecionável, convertida para VP9 CRF 10/Opus, na mesma resolução e cadência. Essa conversão é de alta qualidade, com SSIM alinhado de 0,996806, mas não é sem perdas. Os dados são distribuídos em partes e reunidos em um único arquivo local com conferência de tamanho e assinatura do formato.
+
+**Inteiro** mostra o quadro completo com barras quando necessário; **Preencher** recorta as bordas mantendo a proporção. Escurecimento e volume têm ajustes próprios; o áudio começa mudo. Se os cartões encobrirem a imagem, ajuste a **Transparencia** existente no mesmo menu. O vídeo usa o decoder nativo, baixa apenas quando o painel está aberto e não há cache válido, pausa com o painel fechado ou sem foco e reaproveita o arquivo nas próximas execuções. Não há conversão de quadros para imagens nem envio de vídeo pela rede durante a reprodução.
+
+A reprodução por arquivo local depende de `writefile`, `getcustomasset` e do suporte efetivo do Delta ao formato. O painel só informa **Reproduzindo** depois que `IsLoaded` é verdadeiro e `TimePosition` avança. Falha de download, ausência de APIs, carregamento sem conclusão ou tempo parado produzem uma mensagem, sem manter um observador de verificação ativo para sempre. Há **Tentar carregar video** e **Copiar diagnostico do video**, incluindo as últimas leituras do player em caso de falha. Se Original falhar, teste WebM HQ. Ainda não foi possível confirmar a reprodução no Roblox/Delta; os 60 FPS indicados são da fonte, não uma medição no aparelho. A qualidade e fluidez finais dependem do decoder e do dispositivo.
+
+O código das opções anteriores foi preservado. O arquivo original tem SHA-256 `390b9da02d007cabbb9fe5811fe6bd59c46e237dfa329a2b2103f654366bf595` e 17.413.442 bytes; a alternativa WebM tem SHA-256 `41a40e874d526840799398700c14a64f732e29027658bd26cc10ce1d059a1c39` e 41.448.021 bytes.
+
+Validação local: sintaxe do script completo com Lua 5.4, **13 casos simulados** do vídeo, regressões anteriores de câmera/perfis e 21 casos do xadrez. Foram conferidos pausa/retomada, cache, download incompleto, troca de formato durante transferência, resultados atrasados, ausência de APIs, carregamento sem progresso, limpeza de observadores e proporção em diferentes escalas. Os hashes dos seis blobs de mídia correspondem às partes dos arquivos locais; a comparação de quadros foi feita com cadência e início alinhados. Esses testes não substituem a execução no Delta.
 
 ## Assistente de xadrez para RoChess na versão 0.6.28
 

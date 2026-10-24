@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.28
+-- Huss Valley Panel 0.6.29
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -33,6 +33,7 @@ local defaults = {
     autoAttack=false, attackRange=12, attackDelay=0.4, autoGears=false, gearDelay=1,
     autoRevive=false, autoPick=false, promptDelay=0.6,
     chessAssistant=false,
+    videoBackground=true,videoFormat="Original",videoFit="Inteiro",videoShade=25,videoVolume=0,
     autoDash=false, autoZone=false, autoDown=false, autoTackle=false, dashCooldown=false,
     autoAbility=false, dashSide="Right",dashRange=15,dashDelay=1,dashKey="Q",dashKeyboardFallback=false,tackleRange=6,abilityRange=18,runnerAI=false, catcherAI=false, autoWheel=false, autoJourney=false,
     autoVote=false, disableGameAFK=false, antiIdle=false, antiHit=false,
@@ -55,7 +56,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.28", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.29", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -342,7 +343,7 @@ local requiresAdapter={autoDash="AutoDash",autoZone="AutoZone",autoDown="AutoDow
     dashCooldown="DashCooldown",autoAbility="AutoAbility",runnerAI="RunnerAI",catcherAI="CatcherAI",
     autoWheel="AutoSpinWheel",autoJourney="AutoClaimJourney",autoVote="AutoMapVote",disableGameAFK="DisableGameAFK",
     hitbox="HitBox",leaderboard="LeaderboardVisuals",gems="GemsAndCoins",antiHit="AntiHit"}
-local ranges={walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
+local ranges={videoShade={0,85},videoVolume={0,100},walkSpeed={8,150},flySpeed={5,150},tpSpeed={1,80},spinSpeed={10,360},fov={40,120},radius={5,150},
     prediction={0,0.5},aimSmooth={1,25},lockReleaseRange={5,250},lockCameraFreedom={26,110},attackRange={2,50},attackDelay={0.15,3},gearDelay={0.2,10},
     promptDelay={0.25,3},dashRange={2,100},dashDelay={0.25,10},tackleRange={2,12},abilityRange={2,40},espRange={50,3000},espRate={2,30},fpsCap={30,240},
     shaderReflection={0,0.65},shaderWallReflection={0,0.65},shaderContrast={0,0.4},shaderSaturation={-0.4,0.4},
@@ -359,6 +360,8 @@ local function valid(key,value,keyContext)
     elseif key=="accent" and not palette[value] then return false
     elseif key=="dashSide" and value~="Right" and value~="Left" then return false
     elseif key=="lockMode" and value~="Console" and value~="Classico" then return false
+    elseif key=="videoFormat" and value~="Original" and value~="WebM HQ" then return false
+    elseif key=="videoFit" and value~="Inteiro" and value~="Preencher" then return false
     elseif key=="mobiladorRightMode" and value~="Segurar" and value~="Alternar" and value~="Desligado" then return false
     elseif key=="mobiladorCursorScope" and value~="Sempre" and value~="So na captura" then return false
     elseif key=="mobiladorReticleStyle" and value~="Cruz" and value~="Ponto" and value~="Circulo" and value~="Cruz e ponto" and value~="Imagem" then return false
@@ -432,6 +435,8 @@ end
 local window=themed(create("Frame",{Name="Window",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.46),
     Size=UDim2.fromOffset(730,438),BackgroundTransparency=1-cfg.opacity,BorderSizePixel=0,ClipsDescendants=true,Visible=false},gui),"BackgroundColor3","bg")
 round(window,11)
+API.VideoHost=create("Frame",{Name="VideoBackground",Size=UDim2.fromScale(1,1),BackgroundTransparency=1,ClipsDescendants=true,Visible=false,ZIndex=1},window)
+round(API.VideoHost,11)
 surface(window,0)
 local scale=create("UIScale",{Scale=1},window)
 local border=create("UIStroke",{Color=Color3.fromRGB(65,52,70),Thickness=1,Transparency=0.25},window)
@@ -528,6 +533,176 @@ do
     listen(close.Activated,function() show(false) end)
 end
 
+-- Native background video. Playback is confirmed by advancing media time, not Playing alone.
+do
+    local V={generation=0,focused=true,message="Aguardando abrir o painel"}
+    API.VideoBackground=V
+    V.catalog={
+        ["Original"]={bytes=17413442,extension="mp4",hash="390b9da02d00",parts={{url="https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/d87aa218d401ff7cffb11e798f6e82eccd08f358/media/panel-390b9da02d00.mp4.part1",bytes=10485744},{url="https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/d87aa218d401ff7cffb11e798f6e82eccd08f358/media/panel-390b9da02d00.mp4.part2",bytes=6927698}}},
+        ["WebM HQ"]={bytes=41448021,extension="webm",hash="41a40e874d52",parts={{url="https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/d87aa218d401ff7cffb11e798f6e82eccd08f358/media/panel-41a40e874d52.webm.part1",bytes=10485744},{url="https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/d87aa218d401ff7cffb11e798f6e82eccd08f358/media/panel-41a40e874d52.webm.part2",bytes=10485744},{url="https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/d87aa218d401ff7cffb11e798f6e82eccd08f358/media/panel-41a40e874d52.webm.part3",bytes=10485744},{url="https://raw.githubusercontent.com/twixbryan4-cloud/mousefreeze/d87aa218d401ff7cffb11e798f6e82eccd08f358/media/panel-41a40e874d52.webm.part4",bytes=9990789}}}
+    }
+    function V.Status(message)
+        V.message=message
+        if API.VideoStatus then API.VideoStatus.Text=message end
+    end
+    function V.Wanted()
+        return state.alive and not state.booting and cfg.videoBackground and window.Visible and V.focused
+    end
+    function V.Unwatch()
+        if V.watch then V.watch:Disconnect();V.watch=nil end
+    end
+    function V.Fit()
+        local frame=V.frame;if not frame then return end
+        local size=API.VideoHost.AbsoluteSize;local w,h=size.X,size.Y
+        if w<=0 or h<=0 then return end
+        local scaleFactor=(cfg.videoFit=="Inteiro" and math.min or math.max)(w/1440,h/1080)
+        frame.Size=UDim2.fromScale(1440*scaleFactor/w,1080*scaleFactor/h)
+        frame.Volume=cfg.videoVolume/100
+        if V.shade then V.shade.BackgroundTransparency=1-cfg.videoShade/100 end
+    end
+    function V.Drop()
+        V.generation=V.generation+1;V.Unwatch()
+        if V.loadedConnection then V.loadedConnection:Disconnect();V.loadedConnection=nil end
+        if V.frame then pcall(V.frame.Pause,V.frame);V.frame:Destroy();V.frame=nil end
+        if V.shade then V.shade:Destroy();V.shade=nil end
+        V.startedAt=nil;V.verified=false;V.loaded=false;V.failed=false
+        API.VideoHost.Visible=false
+    end
+    function V.Fail(message)
+        local frame=V.frame
+        if frame then
+            V.lastPlayback={loaded=frame.IsLoaded,playing=frame.Playing,timePosition=frame.TimePosition,timeLength=frame.TimeLength}
+        end
+        V.Drop();V.failed=true;V.Status(message)
+        if state.alive and cfg.videoBackground then notify(message) end
+    end
+    function V.ValidBytes(body,asset)
+        if type(body)~="string" or #body~=asset.bytes then return false end
+        if asset.extension=="mp4" then return body:sub(5,8)=="ftyp" end
+        return body:sub(1,4)==string.char(26,69,223,163)
+    end
+    function V.Fetch(asset)
+        local path="HussPanelVideo_"..asset.hash.."."..asset.extension
+        if type(isfile)=="function" and type(readfile)=="function" and isfile(path) then
+            local ok,body=pcall(readfile,path)
+            if ok and V.ValidBytes(body,asset) then return path end
+        end
+        assert(type(writefile)=="function","writefile indisponivel")
+        local chunks={}
+        local fetch=type(request)=="function" and request or type(http_request)=="function" and http_request or nil
+        for index,part in ipairs(asset.parts) do
+            local body
+            if fetch then
+                local response=fetch({Url=part.url,Method="GET",Timeout=30})
+                assert(type(response)=="table" and response.StatusCode==200,"HTTP do video falhou")
+                body=response.Body
+            else body=game:HttpGet(part.url) end
+            assert(type(body)=="string" and #body==part.bytes,"Download incompleto do video")
+            chunks[index]=body
+        end
+        local body=table.concat(chunks)
+        assert(V.ValidBytes(body,asset),"Formato/arquivo de video invalido")
+        writefile(path,body)
+        return path
+    end
+    function V.Probe()
+        local frame=V.frame;if not frame then return end
+        if not V.Wanted() then
+            V.Unwatch();pcall(frame.Pause,frame);V.startedAt=nil;API.VideoHost.Visible=false;V.Status("Video pausado");return
+        end
+        local now=os.clock()
+        if not frame.IsLoaded then
+            if now-V.loadAt>=12 then V.Fail("Video nao carregou no Delta; tente WebM HQ ou copie o diagnostico") end
+            return
+        end
+        V.loaded=true
+        if not V.startedAt then
+            V.startedAt=now;V.timeBase=frame.TimePosition;frame:Play()
+            V.Status("Confirmando reproducao / "..cfg.videoFormat);return
+        end
+        local position=frame.TimePosition
+        if position>V.timeBase+0.02 or position<V.timeBase-0.02 then
+            V.verified=true;frame.Visible=true;API.VideoHost.Visible=true
+            V.Status("Reproduzindo / 1440x1080 / fonte 60 FPS / "..cfg.videoFormat);V.Unwatch()
+        elseif now-V.startedAt>=4 then V.Fail("Video carregou mas nao reproduziu; copie o diagnostico") end
+    end
+    function V.Watch()
+        if V.watch then return end
+        local elapsed=0
+        V.watch=Run.Heartbeat:Connect(function(dt)
+            elapsed=elapsed+dt;if elapsed<0.25 then return end;elapsed=0
+            local ok,err=pcall(V.Probe)
+            if not ok then V.lastError=tostring(err):sub(1,180);V.Fail("Reproducao indisponivel no Delta; copie o diagnostico") end
+        end)
+    end
+    function V.Attach(path,asset,generation)
+        if generation~=V.generation or not state.alive or not cfg.videoBackground then return end
+        local register=type(getcustomasset)=="function" and getcustomasset or type(getsynasset)=="function" and getsynasset or env.getcustomasset
+        assert(type(register)=="function","getcustomasset indisponivel")
+        local source=register(path);assert(type(source)=="string" and source~="","Registro de video falhou")
+        local frame=create("VideoFrame",{Name="PanelVideo",AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),
+            Size=UDim2.fromScale(1,1),BackgroundTransparency=1,Looped=true,Playing=false,Volume=cfg.videoVolume/100,
+            Video=source,Visible=false,ZIndex=1},API.VideoHost)
+        V.frame=frame;V.asset=asset;V.path=path;V.loadAt=os.clock();V.startedAt=nil;V.verified=false
+        round(frame,11)
+        V.shade=create("Frame",{Name="ReadabilityShade",Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.new(0,0,0),
+            BackgroundTransparency=1-cfg.videoShade/100,BorderSizePixel=0,ZIndex=2},API.VideoHost)
+        round(V.shade,11);V.Fit()
+        V.loadedConnection=frame.Loaded:Connect(function()
+            if generation~=V.generation then return end
+            if V.Wanted() then V.Watch() end
+        end)
+        V.Status("Carregando video / "..cfg.videoFormat)
+        if V.Wanted() then V.Watch();V.Probe() end
+    end
+    function V.Sync()
+        if not V.Wanted() then
+            V.Unwatch();if V.frame then pcall(V.frame.Pause,V.frame) end
+            V.startedAt=nil;API.VideoHost.Visible=false
+            V.Status(cfg.videoBackground and "Video pausado" or "Video desligado");return
+        end
+        if V.failed then return end
+        if V.frame then
+            V.Fit();V.loadAt=os.clock();V.startedAt=nil;V.Watch();V.Probe();return
+        end
+        if V.job then V.Status("Aguardando transferencia do video");return end
+        local asset=V.catalog[cfg.videoFormat];assert(asset,"Formato indisponivel")
+        local generation=V.generation;local job={};V.job=job
+        V.Status("Preparando "..cfg.videoFormat.." / download somente sem cache")
+        job.thread=task.defer(function()
+            if generation~=V.generation or not V.Wanted() then
+                if V.job==job then V.job=nil end
+                if V.Wanted() then V.Sync() end
+                return
+            end
+            local ok,result=pcall(V.Fetch,asset)
+            if V.job==job then V.job=nil end
+            if not state.alive then return end
+            if generation~=V.generation then if V.Wanted() then V.Sync() end;return end
+            if not ok then V.lastError=tostring(result):sub(1,180);V.Fail("Falha ao preparar video; copie o diagnostico");return end
+            local attached,err=pcall(V.Attach,result,asset,generation)
+            if not attached then V.lastError=tostring(err):sub(1,180);V.Fail("Video local nao suportado; copie o diagnostico") end
+        end)
+    end
+    function V.Reload() V.Drop();V.lastError=nil;V.lastPlayback=nil;V.Sync() end
+    function V.Stop() V.Drop();V.Status("Video desligado") end
+    function V.Snapshot()
+        local frame=V.frame
+        return {kind="PanelVideoDiagnostics",version=API.Version,enabled=cfg.videoBackground,format=cfg.videoFormat,
+            message=V.message,lastError=V.lastError,lastPlayback=V.lastPlayback,visible=window.Visible,busy=V.job~=nil,
+            loaded=frame and frame.IsLoaded or false,playing=frame and frame.Playing or false,verified=V.verified,
+            timePosition=frame and frame.TimePosition or 0,timeLength=frame and frame.TimeLength or 0,
+            sourceWidth=1440,sourceHeight=1080,sourceFPS=60,fit=cfg.videoFit,
+            writefile=type(writefile)=="function",getcustomasset=type(getcustomasset)=="function" or type(getsynasset)=="function" or type(env.getcustomasset)=="function"}
+    end
+    actions.videoBackground=function(enabled) if enabled then V.Reload() else V.Stop() end end
+    actions.videoFormat=V.Reload;actions.videoFit=V.Fit;actions.videoShade=V.Fit;actions.videoVolume=V.Fit
+    listen(window:GetPropertyChangedSignal("Visible"),V.Sync)
+    listen(API.VideoHost:GetPropertyChangedSignal("AbsoluteSize"),V.Fit)
+    listen(Input.WindowFocusReleased,function() V.focused=false;V.Sync() end)
+    listen(Input.WindowFocused,function() V.focused=true;V.Sync() end)
+end
+-- End native background video.
 -- Optional draggable action buttons. Their menu toggles control their existence on screen.
 do
     local quick={buttons={},jumping=false,freezeQueued=false,readyAt=0,generation=0,clock=0,lastJump=-math.huge}
@@ -1103,6 +1278,16 @@ slider(c,"Escala do menu","uiScale",0.45,1.6,0.05,"x");cycle(c,"Theme","theme",{
 slider(c,"Transparencia","transparency",0,85,1,"%");checkbox(c,"Notificacoes","notifications");checkbox(c,"Sound Effects","sounds")
 cycle(c,"Accent Color","accent",{"Peach","Purple","Blue","Pink","Green"});checkbox(c,"Rainbow Accent","rainbow")
 customizeExpand()
+do
+    local content=card(left,"Video de fundo","videoBackground","Fonte recebida: 1440x1080, 60 FPS. Original preserva o MP4; WebM HQ e uma conversao para testar compatibilidade. Reproducao depende do Delta.")
+    cycle(content,"Formato","videoFormat",{"Original","WebM HQ"})
+    cycle(content,"Proporcao","videoFit",{"Inteiro","Preencher"})
+    slider(content,"Escurecer video","videoShade",0,85,1,"%")
+    slider(content,"Volume do video","videoVolume",0,100,1,"%")
+    API.VideoStatus=text(content,"Aguardando abrir o painel",9,{Size=UDim2.new(1,0,0,42),TextWrapped=true})
+    actionButton(content,"Tentar carregar video",function() if API.VideoBackground then API.VideoBackground.Reload() end end)
+    actionButton(content,"Copiar diagnostico do video",function() if API.CopyVideoDiagnostics then API.CopyVideoDiagnostics() end end)
+end
 c=card(left,"Interface",nil,"O botao aparece ao recolher a janela. Arraste o botao ou o topo do painel livremente.");cycle(c,"Toggle Menu Key","toggleKey",{"F4","Insert","Home","LeftAlt"})
 actionButton(c,"Reset Position",function() window.Position=UDim2.fromScale(0.5,0.46);fit() end)
 do
@@ -5350,6 +5535,9 @@ end
 function API.CopyChessDiagnostics()
     return presentDiagnostic(Http:JSONEncode(API.Chess.Snapshot()),"Diagnostico do xadrez copiado.")
 end
+function API.CopyVideoDiagnostics()
+    return presentDiagnostic(Http:JSONEncode(API.VideoBackground.Snapshot()),"Diagnostico do video copiado.")
+end
 function API.CopyLockDiagnostics()
     local k=API.LockOn;local cam=workspace.CurrentCamera
     local report={kind="LockOnRelease",version=API.Version,placeId=game.PlaceId,gameId=game.GameId,
@@ -6079,6 +6267,7 @@ end)
 function API.Destroy()
     if not state.alive then return end
     state.alive=false;perfToken=perfToken+1;xrayToken=xrayToken+1
+    if API.VideoBackground then API.VideoBackground.Stop() end
     if API.Chess then API.Chess.Stop() end
     if API.UI then API.UI.Stop() end
     if API.InputMode then API.InputMode.Destroy() end
