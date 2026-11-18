@@ -968,6 +968,16 @@ slider(c,"Alcance do inimigo","dashRange",2,100,1," studs");slider(c,"Delay","da
 checkbox(c,"Fallback por tecla (PC)","dashKeyboardFallback")
 cycle(c,"Tecla do dash (fallback)","dashKey",{"Q","E","F","LeftShift","LeftControl","Space"})
 API.NativeStatusLabels.dash=text(c,"Status: aguardando partida",9)
+do
+    local note=text(c,"",10,{
+        Name="AutoDashStopReason",Visible=false,TextWrapped=true,
+        Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y
+    })
+    API.NativeStatusLabels.dashStopReason=note
+    watch("autoDash",function(enabled)
+        if enabled then note.Visible=false;note.Text="" end
+    end)
+end
 actionButton(c,"Testar dash agora",function() if API.Native then API.Native.Dash(true) end end)
 c=card(right,"Auto Attack","autoAttack","Ataque do jogo contra runners proximos quando voce e catcher. Aguarda a resposta e o intervalo do jogo.")
 slider(c,"Range","attackRange",2,50,1," studs");slider(c,"Delay","attackDelay",0.15,3,0.05,"s")
@@ -4364,6 +4374,18 @@ local function triggerTool(attack)
     return false
 end
 local adapterTimers,activeAdapters,adapterGeneration={},{},{}
+local function reportAdapterStop(key,name,reason,err)
+    set(key,false,true)
+    if key=="autoDash" then
+        local note=API.NativeStatusLabels.dashStopReason
+        if note and note.Parent and not cfg.autoDash then
+            note.Text=reason
+            note.Visible=true
+        end
+    end
+    notify("Integracao interrompida: "..name)
+    warn("[HV] "..tostring(err))
+end
 local function stepAdapters(dt)
     for key,name in pairs(activeAdapters) do
         if cfg[key] and type(adapters[name])=="function" and not state.pending[key] then
@@ -4374,7 +4396,7 @@ local function stepAdapters(dt)
             if perFrame and API.Native.ProximityReady[name] then
                 local ok,result=pcall(API.Native.ProximityReady[name])
                 ready=ok and result~=nil and result~=false
-                if not ok then set(key,false,true);notify("Integracao interrompida: "..name);warn("[HV] "..tostring(result)) end
+                if not ok then reportAdapterStop(key,name,"Desligado por erro ao verificar a disponibilidade.",result) end
             end
             if ready and (perFrame or adapterTimers[key]>=0.25) then
                 local delta=adapterTimers[key];adapterTimers[key]=0;state.pending[key]=true
@@ -4384,7 +4406,7 @@ local function stepAdapters(dt)
                     if not isActive() then state.pending[key]=nil;return end
                     local ok,err=pcall(callback,{Player=player,Config=cfg,Character=char,Delta=delta,Enabled=true,IsActive=isActive})
                     state.pending[key]=nil
-                    if not ok and isActive() then set(key,false,true);notify("Integracao interrompida: "..name);warn("[HV] "..tostring(err)) end
+                    if not ok and isActive() then reportAdapterStop(key,name,"Desligado por erro durante a execução da ação.",err) end
                 end)
             end
         end
