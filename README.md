@@ -1,6 +1,12 @@
 # Huss Valley Panel
 
-Versão 0.6.34 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.35 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Mouse em câmeras de jogos de tiro na versão 0.6.35
+
+Em **World → Mobilador / mouse**, ligue **Entrada nativa sem clicar** e **Aplicar em camera personalizada**. Feche o painel e aperte **V** (ou a tecla de captura que você configurou). O modo opcional permite girar uma câmera `Scriptable` do personagem e uma câmera `Custom` em primeira pessoa. O painel observa a direção da visão em cada quadro e cede o giro quando o próprio jogo já a move. Use **V** novamente para soltar o mouse.
+
+O movimento relativo recebido do mouse usa o multiplicador de **Sensibilidade da captura** também nos giros rápidos. **Fixar multiplicador do mouse** aplica o valor escolhido durante a captura por V e pelo Shift Lock nativo. A posição absoluta do ponteiro continua servindo de reserva quando o adaptador não informa deslocamento relativo. Movimentos de recentralização dessa posição são descartados.
 
 ## Tema Glass na versão 0.6.34
 

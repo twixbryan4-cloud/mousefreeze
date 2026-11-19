@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.34
+-- Huss Valley Panel 0.6.35
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -75,7 +75,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.34", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.35", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -1096,6 +1096,7 @@ do
     actionButton(content,"Recuperar mouse agora",function() if API.Mobilador then API.Mobilador.Recover() end end)
     text(content,"Recuperar limpa a captura do painel e devolve a camera ao jogo. V captura novamente.",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
     checkbox(content,"Aplicar em camera personalizada","mobiladorCustomCamera")
+    text(content,"Em jogos com camera propria, ligue esta opcao e Entrada nativa sem clicar. Feche o painel e aperte a tecla de captura para girar com o mouse.",9,{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,TextWrapped=true})
     checkbox(content,"Fixar multiplicador do mouse","mobiladorFixedSensitivity")
     slider(content,"Multiplicador do mouse","mobiladorSensitivity",0.1,3,0.05,"x")
     API.MobiladorStatus=text(content,"Status: desligado",9,{Size=UDim2.new(1,0,0,42),TextWrapped=true})
@@ -2322,49 +2323,120 @@ do
         return ok
     end
     function M.ResetMotion()
-        M.lookDX=0;M.lookDY=0;M.motionAt=nil;M.absPoint=nil;M.frameActive=false;M.frameBridge=nil
+        M.lookDX=0;M.lookDY=0;M.motionAt=nil;M.mouseSample=false;M.relativeSample=false;M.absPoint=nil;M.absViewport=nil;M.frameActive=false;M.frameBridge=nil
         M.frameRotation=Vector2.new(0,0)
+        M.viewCamera=nil;M.viewBase=nil;M.viewOutput=nil;M.viewOffset=nil;M.viewStart=nil;M.viewKind=nil;M.viewPrepared=false;M.viewRoute=nil
     end
-    function M.PrepareInput(cam,dt,owned,native)
-        local b=M.bridge
-        M.frameActive=false;M.frameBridge=nil
+    function M.ReadLook(cam,owned)
+        -- Consume each physical sample once. Pointer coordinates are a fallback on hubs that omit relative motion.
         local ok,point=pcall(Input.GetMouseLocation,Input)
+        local size=cam.ViewportSize
+        local previous,previousSize=M.absPoint,M.absViewport
+        local valid=ok and point and finite(point.X) and finite(point.Y)
+            and size.X>0 and size.Y>0 and point.X>=0 and point.X<=size.X and point.Y>=0 and point.Y<=size.Y
+        M.absPoint=valid and point or nil;M.absViewport=valid and size or nil
         local absoluteX,absoluteY=0,0
-        if ok and point and finite(point.X) and finite(point.Y) then
-            if M.absPoint then absoluteX=point.X-M.absPoint.X;absoluteY=point.Y-M.absPoint.Y end
-            M.absPoint=point;M.pointerPoint=point
-        else M.absPoint=nil end
-        if owned and Input.MouseBehavior==Enum.MouseBehavior.LockCenter and (absoluteX~=0 or absoluteY~=0) then
+        if valid then
+            M.pointerPoint=point
+            if previous and previousSize and previousSize.X==size.X and previousSize.Y==size.Y then
+                absoluteX=point.X-previous.X;absoluteY=point.Y-previous.Y
+            end
+        end
+        local locked=Input.MouseBehavior==Enum.MouseBehavior.LockCenter
+        if owned and locked and (absoluteX~=0 or absoluteY~=0) then
             M.stats.pointerChangesWhileLocked=(M.stats.pointerChangesWhileLocked or 0)+1
         end
-        local x,y=M.lookDX or 0,M.lookDY or 0;M.lookDX=0;M.lookDY=0
-        local free=M.ExplicitFree()
-        -- Released input is transparent: never replace native rotation/activation with zero.
-        if free then M.inputSource="nativa";return end
+        local x,y=M.lookDX or 0,M.lookDY or 0
+        local fresh=M.motionAt~=nil and os.clock()-M.motionAt<=0.12
+        local sample=M.mouseSample and fresh
+        local relative=M.relativeSample and fresh
+        M.lookDX=0;M.lookDY=0;M.motionAt=nil;M.mouseSample=false;M.relativeSample=false
+        if not fresh then x,y=0,0 end
+        local source="evento"
+        if not relative and sample and locked then
+            local got,delta=pcall(Input.GetMouseDelta,Input)
+            if got and delta and finite(delta.X) and finite(delta.Y) then
+                x,y=delta.X,delta.Y
+                if x~=0 or y~=0 then source="delta do quadro" end
+            end
+        end
+        if not relative and x==0 and y==0 then
+            source="posicao"
+            if absoluteX~=0 or absoluteY~=0 then
+                local recentered=locked and math.abs(point.X-size.X*0.5)<=1 and math.abs(point.Y-size.Y*0.5)<=1
+                local wrapped=locked and (math.abs(absoluteX)>=size.X-2 or math.abs(absoluteY)>=size.Y-2)
+                if not recentered and not wrapped then x,y=absoluteX,absoluteY end
+            end
+        end
+        local scale=math.rad(0.5)*cfg.mobiladorLookSpeed
+        local rotation=Vector2.new(x*scale,y*scale*0.77*M.lookInvert)
+        if rotation.X~=0 or rotation.Y~=0 then
+            M.inputSource=source
+            M.stats.motionFrames=(M.stats.motionFrames or 0)+1
+            local key=M.leftDown and "motionWithLeft" or "motionWithoutLeft"
+            M.stats[key]=(M.stats[key] or 0)+1
+            if source=="posicao" then M.stats.absoluteFrames=(M.stats.absoluteFrames or 0)+1 end
+        end
+        return rotation
+    end
+    function M.PrepareInput(cam,owned,native)
+        local b=M.bridge
+        M.frameActive=false;M.frameBridge=nil
+        local rotation=M.ReadLook(cam,owned)
+        if M.ExplicitFree() then M.inputSource="nativa";return end
         if not b or not b.active or not cfg.mobiladorDirectLook or not (owned or native) then return end
         for key,entry in pairs(b.functions) do
             if b.input[key]~=entry.wrapper then M.DetachBridge();M.bridgeStatus="entrada alterada pelo jogo; use "..cfg.mobiladorRecoverKey;return end
         end
         local enabledOK,enabled=pcall(b.input.getInputEnabled)
         if not enabledOK or not enabled then return end
-        if not M.motionAt or os.clock()-M.motionAt>0.12 then x,y=0,0 end
-        local source="evento"
-        if x==0 and y==0 then
-            source="posicao"
-            if math.abs(absoluteX)<=160 and math.abs(absoluteY)<=160 then x,y=absoluteX,absoluteY end
+        M.frameRotation=rotation;M.frameOwned=owned or (native and cfg.mobiladorFixedSensitivity);M.frameActive=true;M.frameBridge=b
+    end
+    -- Client display only. Use the active camera pose; retain an offset only while its controller keeps rewriting the same heading.
+    function M.PrepareCustomView(cam)
+        local rotation=M.ReadLook(cam,true)
+        M.frameRotation=rotation;M.viewPrepared=true;M.viewCamera=cam;M.viewKind=cam.CameraType
+        M.viewStart=cam.CFrame.LookVector
+    end
+    local function sameHeading(look,other)
+        return other~=nil and (look-other).Magnitude<=0.00001
+    end
+    function M.FinishCustomView(cam)
+        if not M.viewPrepared then return end
+        M.viewPrepared=false
+        if M.viewCamera~=cam or M.viewKind~=cam.CameraType then return end
+        local pose=cam.CFrame
+        local look=pose.LookVector
+        local baseAgain=sameHeading(look,M.viewBase)
+        local heldOutput=sameHeading(look,M.viewOutput)
+        local changedDuringFrame=not sameHeading(look,M.viewStart)
+        local changedBeforeFrame=M.viewBase~=nil and not baseAgain and not heldOutput
+        if (changedDuringFrame and not baseAgain) or changedBeforeFrame then
+            M.viewBase=look;M.viewOutput=nil;M.viewOffset=nil
+            M.viewRoute="giro do jogo"
+            return
         end
-        if math.abs(x)>400 or math.abs(y)>400 then x,y=0,0;M.stats.warps=(M.stats.warps or 0)+1 end
-        local scale=math.rad(0.5)*cfg.mobiladorLookSpeed
-        local limit=math.rad(720)*math.clamp(dt or 1/60,1/240,1/15)*cfg.mobiladorLookSpeed
-        M.frameRotation=Vector2.new(math.clamp(x*scale,-limit,limit),math.clamp(y*scale*0.77*M.lookInvert,-limit,limit))
-        M.frameOwned=owned;M.frameActive=true;M.frameBridge=b
-        M.inputSource=source
-        if M.frameRotation.Magnitude>0 then
-            M.stats.motionFrames=(M.stats.motionFrames or 0)+1
-            local key=M.leftDown and "motionWithLeft" or "motionWithoutLeft"
-            M.stats[key]=(M.stats[key] or 0)+1
-            if source=="posicao" then M.stats.absoluteFrames=(M.stats.absoluteFrames or 0)+1 end
+        local delta=M.frameRotation
+        local rotation=pose.Rotation
+        local base=rotation
+        if M.viewOffset then
+            if baseAgain and not heldOutput then rotation=base*M.viewOffset
+            elseif heldOutput then base=rotation*M.viewOffset:Inverse()
+            else M.viewOffset=nil end
         end
+        if delta.X==0 and delta.Y==0 then
+            if M.viewOffset and baseAgain and not heldOutput then cam.CFrame=CFrame.new(pose.Position)*rotation end
+            if not M.viewOffset then M.viewBase=look end
+            return
+        end
+        local pitch,yaw,roll=rotation:ToOrientation()
+        local pitchLimit=math.rad(89.5)
+        if delta.Y~=0 then pitch=math.clamp(pitch-delta.Y,-pitchLimit,pitchLimit) end
+        local view=CFrame.fromOrientation(pitch,yaw-delta.X,roll)
+        cam.CFrame=CFrame.new(pose.Position)*view
+        M.viewBase=base.LookVector;M.viewOutput=view.LookVector;M.viewOffset=base:ToObjectSpace(view)
+        M.viewRoute="giro pelo mouse"
+        M.stats.customLookFrames=(M.stats.customLookFrames or 0)+1
     end
     function M.CancelBind()
         M.bindKey=nil
@@ -2411,8 +2483,14 @@ do
         return subject==hum or subject==root or (subject and subject.Parent==player.Character and subject:IsA("BasePart"))
     end
     function M.CameraAllowed(cam,hum,root)
-        if not cam or not cam.Parent or not hum or hum.Health<=0 or not localSubject(cam,hum,root) then return false end
+        if not cam or not cam.Parent or not hum or hum.Health<=0 then return false end
         local kind=cam.CameraType
+        if kind==Enum.CameraType.Scriptable and cfg.mobiladorCustomCamera and M.shift and cam.CameraSubject==nil then
+            local char=player.Character
+            local anchor=char and (char:FindFirstChild("Head") or root)
+            return anchor~=nil and anchor:IsA("BasePart") and (cam.CFrame.Position-anchor.Position).Magnitude<=5
+        end
+        if not localSubject(cam,hum,root) then return false end
         if kind==Enum.CameraType.Scriptable then
             local lock=API.LockOn
             return cfg.mobiladorCustomCamera or (cfg.lockOn and lock and lock.target~=nil)
@@ -2468,7 +2546,9 @@ do
         if M.camera~=cam then M.camera=cam;M.first=false;M.ResetMotion() end
         if not M.CameraAllowed(cam,hum,root) then
             M.target=nil;M.first=false;M.ClearPresses(false);M.ReleaseAll()
-            M.Status("CAMERA DO JOGO","controle com a camera do jogo");return
+            local hint=cam and cam.CameraType==Enum.CameraType.Scriptable and not cfg.mobiladorCustomCamera
+                and "camera do jogo; ative Aplicar em camera personalizada" or "controle com a camera do jogo"
+            M.Status("CAMERA DO JOGO",hint);return
         end
         if not (Input.MouseEnabled or Input.KeyboardEnabled or M.seenMouse) then
             M.target=nil;M.ReleaseAll();M.Status("SEM MOUSE","aguardando mouse ou teclado");return
@@ -2510,16 +2590,18 @@ do
         end
         local captured=wrote and not recovering and (owned or not M.ExplicitFree() and M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter)
         M.SetMarker(captured)
-        if owned and cfg.mobiladorFixedSensitivity then M.Write("MouseDeltaSensitivity",cfg.mobiladorSensitivity)
+        if captured and not M.ExplicitFree() and cfg.mobiladorFixedSensitivity then M.Write("MouseDeltaSensitivity",cfg.mobiladorSensitivity)
         else M.Release("MouseDeltaSensitivity") end
         local mode=recovering and "RECUPERANDO" or owned and "TECLA" or captured and "CAMERA NATIVA" or "LIVRE"
         if not wrote then mode="API INDISPONIVEL" end
-        local status=owned and (cfg.mobiladorShiftKey..": captura; "..(M.bridgeStatus or "entrada pendente"))
+        local route=M.viewRoute or (cam.CameraType==Enum.CameraType.Scriptable and not cfg.mobiladorDirectLook
+            and "ative Entrada nativa sem clicar") or M.bridgeStatus or "entrada pendente"
+        local status=owned and (cfg.mobiladorShiftKey..": captura; "..route)
             or recovering and "recuperando mouse" or M.ExplicitFree() and ("camera com o jogo; "..cfg.mobiladorShiftKey.." captura novamente")
             or captured and "Shift / primeira pessoa com o jogo" or "mouse livre; Shift com o jogo"
         M.Status(mode,status)
     end
-    function M.BeforeCamera(dt)
+    function M.BeforeCamera()
         if not M.running or not state.alive then return end
         local cam=workspace.CurrentCamera
         if M.Blocked() or not M.CameraAllowed(cam,M.hum,M.root) then M.SyncModals(false);M.ResetMotion();M.SetMarker(false);return end
@@ -2534,12 +2616,27 @@ do
         elseif M.mouseOwned then
             if M.ExplicitFree() then M.ReturnToGame() else M.ReleaseMouse() end
         end
-        if cam.CameraType==Enum.CameraType.Scriptable or cfg.lockOn and API.LockOn and API.LockOn.target then M.ResetMotion();return end
+        if cfg.lockOn and API.LockOn and API.LockOn.target then M.ResetMotion();return end
+        if owned and M.inputCaptured~=true then
+            M.ResetMotion();M.inputCaptured=true
+        end
+        local kind=cam.CameraType
+        local custom=cfg.mobiladorCustomCamera and cfg.mobiladorDirectLook and M.shift and
+            (kind==Enum.CameraType.Scriptable or kind==Enum.CameraType.Custom and M.first)
+        if custom then
+            if M.viewCamera~=cam or M.viewKind~=kind then
+                M.ResetMotion();M.inputCaptured=true;M.viewRoute="camera personalizada"
+            end
+            M.PrepareCustomView(cam)
+            return
+        end
+        if M.viewCamera then M.ResetMotion();M.inputCaptured=nil end
+        if kind==Enum.CameraType.Scriptable then M.ResetMotion();return end
         local native,known=M.ReadNativeChoice()
         if not M.EnsureNativeCapture(native,known) then M.ResetMotion();return end
         native=not M.ExplicitFree() and (native or Input.MouseBehavior==Enum.MouseBehavior.LockCenter and not M.mouseOwned)
         if M.inputCaptured~=(owned or native) then M.ResetMotion();M.inputCaptured=owned or native end
-        M.PrepareInput(cam,dt,owned,native)
+        M.PrepareInput(cam,owned,native)
     end
     function M.FinalizeCapture()
         if not M.running or not state.alive or not cfg.mobilador then return end
@@ -2555,6 +2652,9 @@ do
             if Input.MouseBehavior~=target then M.stats.finalCorrections=(M.stats.finalCorrections or 0)+1 end
             M.target=target;M.WriteCapture(target)
         end
+        if owned and M.shift and cfg.mobiladorCustomCamera and cfg.mobiladorDirectLook
+            and not (cfg.lockOn and API.LockOn and API.LockOn.target) then M.FinishCustomView(cam)
+        else M.viewPrepared=false end
         M.UpdateCursor()
     end
     local function pointerHitsUI(input)
@@ -2622,7 +2722,8 @@ do
         if x~=0 or y~=0 then stats.nonzero=stats.nonzero+1;M.phaseMoves=(M.phaseMoves or 0)+1 end
         stats.maxDelta=math.max(stats.maxDelta,math.abs(x),math.abs(y))
         if cfg.mobiladorDirectLook and not M.ExplicitFree() and (M.WantsCapture() or M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter) then
-            M.lookDX=math.clamp((M.lookDX or 0)+x,-20000,20000);M.lookDY=math.clamp((M.lookDY or 0)+y,-20000,20000);M.motionAt=os.clock()
+            M.lookDX=(M.lookDX or 0)+x;M.lookDY=(M.lookDY or 0)+y
+            M.mouseSample=true;M.relativeSample=M.relativeSample or x~=0 or y~=0;M.motionAt=os.clock()
         end
     end
     function M.Stop()
@@ -2661,10 +2762,13 @@ do
             if value==1 or value==-1 then M.lookInvert=value end
         end)
         if M.running then
+            if M.customLook~=cfg.mobiladorCustomCamera then M.ResetMotion();M.inputCaptured=nil end
+            M.customLook=cfg.mobiladorCustomCamera
             if M.directLook~=cfg.mobiladorDirectLook then M.FindNativeCamera() end
             M.directLook=cfg.mobiladorDirectLook;M.UpdateCursor();return
         end
         M.running=true;M.focused=true;M.camera=workspace.CurrentCamera;M.first=false;M.directLook=cfg.mobiladorDirectLook
+        M.customLook=cfg.mobiladorCustomCamera
         M.ResetMotion();M.FindNativeCamera()
         local menuOK,opened=pcall(function() return GuiService and GuiService.MenuIsOpen end)
         M.menuOpen=menuOK and opened==true or false
@@ -2704,6 +2808,7 @@ do
             markerEnabled=markerGui.Enabled,markerSize=cfg.mobiladorReticleSize,markerStyle=cfg.mobiladorReticleStyle,
             customImageLoaded=image.IsLoaded==true,cursorScope=cfg.mobiladorCursorScope,cursorFailures=M.cursorFailures,cursorSuspended=M.cursorFault==true,
             cursorUpdateMode="InputChanged + render",cursorEventSamples=M.cursorEventSamples or 0,
+            customCameraEnabled=cfg.mobiladorCustomCamera,customCameraRoute=M.viewRoute,
             nativeShift=M.nativeLocked,nativeShiftKnown=M.nativeKnown,bridgeStatus=M.bridgeStatus,bridgeCalls=M.bridge and M.bridge.calls or 0,
             bridgeSource=M.bridge and M.bridge.source or "none",inputSource=M.inputSource or "none",menuKey=cfg.toggleKey,shiftKeysReserved=true,
             freeRequested=M.ExplicitFree(),keyDown=M.keyDown,modalOverrides=M.modalCount or 0,finalCapturePass=true,
