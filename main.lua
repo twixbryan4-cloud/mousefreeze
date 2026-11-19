@@ -1,4 +1,4 @@
--- Huss Valley Panel 0.6.35
+-- Huss Valley Panel 0.6.36
 -- Interface inspirada no video de referencia. Nenhuma categoria/catalogo de facas.
 -- Sem bibliotecas externas. Recursos especificos do jogo usam adaptadores explicitos.
 local Players = game:GetService("Players")
@@ -43,7 +43,7 @@ local defaults = {
     resizeJumpButton=false, jumpButtonScale=1.5,
     resizeShiftLock=false, shiftLockScale=1.5, selectedButtonScale=1,
     mobilador=false, pcInputMode=false, mobiladorShift=true, mobiladorShiftKey="V", mobiladorRightMode="Segurar", mobiladorRecoverKey="F8",
-    mobiladorCustomCamera=false, mobiladorFixedSensitivity=false, mobiladorSensitivity=1,
+    mobiladorCustomCamera=false, mobiladorFixedSensitivity=false, mobiladorSensitivity=1, mobiladorPcGestures=false,
     mobiladorReticle=true, mobiladorReticleSize=22,
     mobiladorManual=true, mobiladorDirectLook=true, mobiladorLookSpeed=1, mobiladorCursorScope="Sempre", mobiladorReticleStyle="Cruz", mobiladorReticleColor="Branco",
     mobiladorReticleThickness=2, mobiladorReticleGap=4, mobiladorReticleOpacity=100, mobiladorReticleImage="",
@@ -75,7 +75,7 @@ local connections, watchers, actions, pages, navs, accentRefreshers = {}, {}, {}
 local optionLabels,menuSurfaces,uiDirty={},{},false
 local state = {alive=true, booting=true, visible=true, page="Combat", up=false, down=false, pending={}, frames=0, time=0}
 local adapters = env.HussValleyAdapters or {}
-local API = {Version="0.6.35", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
+local API = {Version="0.6.36", Config=cfg, Adapters=adapters,NativeStatusLabels={}}
 env.HussValleyPanel = API
 local function listen(signal, fn)
     local c=signal:Connect(fn); connections[#connections+1]=c; return c
@@ -1072,6 +1072,8 @@ do
     slider(content,"Sensibilidade da captura","mobiladorLookSpeed",0.25,3,0.05,"x")
     cycle(content,"Botao direito","mobiladorRightMode",{"Segurar","Alternar","Desligado"})
     text(content,"Botao direito e captura automatica da primeira pessoa so atuam com Somente a tecla desligado.",9,{Size=UDim2.new(1,0,0,32),TextWrapped=true})
+    checkbox(content,"Gestos de mouse do PC","mobiladorPcGestures")
+    text(content,"V tenta soltar o cursor no centro. Em terceira pessoa, segure o esquerdo e arraste para girar a camera a partir do ponto do clique.",9,{Size=UDim2.new(1,0,0,36),TextWrapped=true})
     checkbox(content,"Cursor personalizado","mobiladorReticle")
     cycle(content,"Usar cursor","mobiladorCursorScope",{"Sempre","So na captura"})
     text(content,"Sempre: funciona mesmo com Mobilador desligado; acompanha o mouse livre e o cursor central do Shift Lock. Desenhos de botoes e miras proprias da interface do jogo ficam com o jogo.",9,{Size=UDim2.new(1,0,0,44),TextWrapped=true})
@@ -2067,6 +2069,7 @@ do
         if r then pcall(function() if Input[property]==r.last and Input[property]~=r.base then Input[property]=r.base end end) end
     end
     function M.ReleaseAll()
+        M.EndPointerHold()
         M.SyncModals(false)
         M.SetMarker(false)
         M.ReleaseMouse();M.Release("MouseDeltaSensitivity")
@@ -2097,10 +2100,22 @@ do
         local now=os.clock()
         if M.nextStatus and now<M.nextStatus then return end
         M.nextStatus=now+0.3
+        local capture=M.lastVCapture
+        if M.shift and capture and (mode=="TECLA" or mode=="CAMERA DO JOGO" or mode=="SEM MOUSE" or mode=="API INDISPONIVEL") then
+            local cam=workspace.CurrentCamera
+            local subject=cam and cam.CameraSubject
+            capture.mode=mode;capture.cameraType=enumName(cam and cam.CameraType)
+            capture.subjectClass=subject and subject.ClassName or "none"
+            capture.firstPerson=M.first;capture.mouseBehavior=enumName(Input.MouseBehavior)
+            capture.inputSource=M.inputSource;capture.viewRoute=M.viewRoute
+            capture.relativeMoves=M.stats.nonzero-capture.startMoves
+            capture.appliedTurns=(M.stats.customLookFrames or 0)-capture.startTurns
+        end
         local value="Status: "..message
         if API.MobiladorStatus and API.MobiladorStatus.Text~=value then API.MobiladorStatus.Text=value end
     end
     function M.ClearPresses(clearShift)
+        M.EndPointerHold()
         M.rightHeld=false;M.rightToggle=false;M.rightDown=false;M.keyDown=false
         M.rightSeenDown=false;M.keySeenDown=false;M.leftDown=false;M.rightPollAfter=nil;M.rightUpSince=nil;M.keyPressedAt=nil
         if clearShift then M.shift=false;M.freeRequested=false;M.nativeLocked=false;M.capturePulse=nil end
@@ -2201,6 +2216,7 @@ do
         end)
     end
     function M.WriteCapture(value)
+        if M.pointerHold then M.EndPointerHold() end
         if M.capturePulse and value==Enum.MouseBehavior.LockCenter then
             M.capturePulse=nil;M.ResetMotion();M.inputCaptured=nil
             if not M.Write("MouseBehavior",Enum.MouseBehavior.Default) then M.mouseOwned=true;return false end
@@ -2342,7 +2358,8 @@ do
                 absoluteX=point.X-previous.X;absoluteY=point.Y-previous.Y
             end
         end
-        local locked=Input.MouseBehavior==Enum.MouseBehavior.LockCenter
+        local centered=Input.MouseBehavior==Enum.MouseBehavior.LockCenter
+        local locked=centered or (M.pointerHold and M.pointerHold.camera and Input.MouseBehavior==Enum.MouseBehavior.LockCurrentPosition)
         if owned and locked and (absoluteX~=0 or absoluteY~=0) then
             M.stats.pointerChangesWhileLocked=(M.stats.pointerChangesWhileLocked or 0)+1
         end
@@ -2363,7 +2380,7 @@ do
         if not relative and x==0 and y==0 then
             source="posicao"
             if absoluteX~=0 or absoluteY~=0 then
-                local recentered=locked and math.abs(point.X-size.X*0.5)<=1 and math.abs(point.Y-size.Y*0.5)<=1
+                local recentered=centered and math.abs(point.X-size.X*0.5)<=1 and math.abs(point.Y-size.Y*0.5)<=1
                 local wrapped=locked and (math.abs(absoluteX)>=size.X-2 or math.abs(absoluteY)>=size.Y-2)
                 if not recentered and not wrapped then x,y=absoluteX,absoluteY end
             end
@@ -2498,20 +2515,125 @@ do
         return kind==Enum.CameraType.Custom or kind==Enum.CameraType.Follow or kind==Enum.CameraType.Track
             or kind==Enum.CameraType.Attach or kind==Enum.CameraType.Orbital
     end
-    function M.ReleaseMouse()
+    -- A short handoff on V release, or the lifetime of a real left-button press.
+    -- The native pointer owns the coordinates used by both the icon and the game's hit tests.
+    function M.HoldCurrentPointer(camera)
+        local lock=Enum.MouseBehavior.LockCurrentPosition
+        local owned=Input.MouseBehavior~=lock
+        if owned then
+            local ok=pcall(function() Input.MouseBehavior=lock end)
+            if not ok or Input.MouseBehavior~=lock then return false end
+        end
+        M.pointerHold={camera=camera,owned=owned}
+        return true
+    end
+    function M.EndPointerHold()
+        local hold=M.pointerHold
+        if not hold then return end
+        M.pointerHold=nil
+        if hold.camera then M.ResetMotion() end
+        if not hold.owned then return end
+        local lock=Enum.MouseBehavior.LockCurrentPosition
+        local ok=pcall(function()
+            if Input.MouseBehavior==lock then
+                Input.MouseBehavior=Enum.MouseBehavior.Default
+                assert(Input.MouseBehavior~=lock,"pointer release")
+            end
+        end)
+        if not ok and not M.mouseOwned then
+            M.records.MouseBehavior={base=Enum.MouseBehavior.Default,last=lock};M.mouseOwned=true
+        end
+    end
+    function M.CanDragCamera(cam)
+        if not cfg.mobiladorPcGestures or not cam or M.WantsCapture() or M.nativeLocked or M.recoverUntil
+            or Input.MouseBehavior==Enum.MouseBehavior.LockCenter or player.CameraMode==Enum.CameraMode.LockFirstPerson then return false end
+        if cam.CameraType~=Enum.CameraType.Custom and cam.CameraType~=Enum.CameraType.Follow then return false end
+        if not M.CameraAllowed(cam,M.hum,M.root) or (cfg.lockOn and API.LockOn and API.LockOn.target) then return false end
+        local head=player.Character and player.Character:FindFirstChild("Head")
+        return (cam.CFrame.Position-cam.Focus.Position).Magnitude>1.4
+            and (not head or not head:IsA("BasePart") or (cam.CFrame.Position-head.Position).Magnitude>1.4)
+    end
+    function M.BeginLeftDrag(cam)
+        if M.mouseOwned or M.rightDown or Input.MouseBehavior~=Enum.MouseBehavior.Default or not M.CanDragCamera(cam) then return end
+        local ok,right=pcall(Input.IsMouseButtonPressed,Input,Enum.UserInputType.MouseButton2)
+        if ok and right then return end
+        local params=RaycastParams.new()
+        params.FilterType=Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances={player.Character}
+        params.RespectCanCollide=true
+        params.IgnoreWater=true
+        if not M.HoldCurrentPointer(cam) then return end
+        local drag=M.pointerHold
+        drag.pending=Vector2.new(0,0)
+        drag.params=params
+        M.ResetMotion();M.ReadLook(cam,false)
+    end
+    function M.PrepareLeftDrag(cam,drag)
+        if drag.camera~=cam or not M.CanDragCamera(cam) or Input.MouseBehavior~=Enum.MouseBehavior.LockCurrentPosition then
+            M.EndPointerHold();return
+        end
+        local ok,down=pcall(Input.IsMouseButtonPressed,Input,Enum.UserInputType.MouseButton1)
+        if ok and down then drag.seenDown=true;drag.upSince=nil
+        elseif ok and drag.seenDown then
+            local now=os.clock()
+            drag.upSince=drag.upSince or now
+            if now-drag.upSince>=0.06 then M.leftDown=false;M.EndPointerHold();return end
+        end
+        local motion=M.ReadLook(cam,false)
+        if not drag.turning then
+            drag.pending=drag.pending+motion
+            if drag.pending.Magnitude<math.rad(2)*cfg.mobiladorLookSpeed then return end
+            drag.turning=true;motion=drag.pending
+        end
+        if motion.X~=0 or motion.Y~=0 then
+            if drag.motion then drag.motion=drag.motion+motion
+            else drag.motion=motion;drag.heading=cam.CFrame.LookVector end
+        end
+    end
+    function M.FinishLeftDrag(cam,drag)
+        local motion=drag.motion;drag.motion=nil
+        if not motion or not sameHeading(cam.CFrame.LookVector,drag.heading) then return end
+        local pose=cam.CFrame
+        local pivot=cam.Focus.Position
+        local pitch,yaw,roll=pose.Rotation:ToOrientation()
+        local limit=math.rad(89.5)
+        local rotation=CFrame.fromOrientation(math.clamp(pitch-motion.Y,-limit,limit),yaw-motion.X,roll)
+        local origin=CFrame.new(pivot)
+        local view=origin*(rotation*pose.Rotation:Inverse())*origin:ToObjectSpace(pose)
+        local offset=view.Position-pivot
+        local ok,hit=pcall(workspace.Raycast,workspace,pivot,offset,drag.params)
+        if not ok then M.EndPointerHold();return end
+        if hit then view=CFrame.new(pivot+offset.Unit*math.max(0,hit.Distance-0.25))*view.Rotation end
+        cam.CFrame=view
+    end
+    function M.ReleaseLeftDrag()
+        local drag=M.pointerHold
+        if not drag or not drag.camera then return end
+        local cam=workspace.CurrentCamera
+        -- A quick drag can begin and end between render steps.
+        if (drag.motion or M.mouseSample) and cam==drag.camera and not M.Blocked() then
+            M.PrepareLeftDrag(cam,drag)
+            if M.pointerHold==drag then M.FinishLeftDrag(cam,drag) end
+        end
+        M.EndPointerHold()
+    end
+    function M.ReleaseMouse(fromCenter)
         if not M.mouseOwned then return end
         local native,known=M.NativeLock()
         local r=M.records.MouseBehavior;M.records.MouseBehavior=nil
         if r and Input.MouseBehavior==r.last then
-            pcall(function()
-                Input.MouseBehavior=not M.ExplicitFree() and known and native and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
-            end)
+            local target=not M.ExplicitFree() and known and native and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
+            local handoff=fromCenter and target==Enum.MouseBehavior.Default and r.last==Enum.MouseBehavior.LockCenter
+                and not M.WantsCapture() and M.HoldCurrentPointer(nil)
+            if not handoff then pcall(function() Input.MouseBehavior=target end) end
         end
         M.mouseOwned=false
     end
-    function M.ReturnToGame()
+    function M.ReturnToGame(fromCenter)
+        if fromCenter then M.ReleaseMouse(true) end
         M.SyncModals(false);M.ResetMotion();M.inputCaptured=nil;M.capturePulse=nil
-        M.Release("MouseDeltaSensitivity");M.ReleaseMouse();M.target=nil;M.inputSource="nativa"
+        M.Release("MouseDeltaSensitivity");if not fromCenter then M.ReleaseMouse() end
+        M.target=nil;M.inputSource="nativa"
         M.stats.nativeHandoffs=(M.stats.nativeHandoffs or 0)+1
     end
     function M.Recover()
@@ -2604,12 +2726,16 @@ do
     function M.BeforeCamera()
         if not M.running or not state.alive then return end
         local cam=workspace.CurrentCamera
-        if M.Blocked() or not M.CameraAllowed(cam,M.hum,M.root) then M.SyncModals(false);M.ResetMotion();M.SetMarker(false);return end
+        if M.Blocked() or not M.CameraAllowed(cam,M.hum,M.root) then M.EndPointerHold();M.SyncModals(false);M.ResetMotion();M.SetMarker(false);return end
         if M.failures and (M.failures>=3 or M.retryAt and os.clock()<M.retryAt) then M.ResetMotion();return end
         local recovering=M.recoverUntil and os.clock()<M.recoverUntil
         if recovering then M.ResetMotion();return end
         local owned=M.WantsCapture()
         M.SyncModals(owned==true)
+        if M.pointerHold and M.pointerHold.camera then
+            M.PrepareLeftDrag(cam,M.pointerHold)
+            if M.pointerHold then return end
+        end
         if owned then
             local wrote=M.WriteCapture(Enum.MouseBehavior.LockCenter)
             if not wrote then M.ResetMotion();return end
@@ -2639,6 +2765,16 @@ do
         M.PrepareInput(cam,owned,native)
     end
     function M.FinalizeCapture()
+        local hold=M.pointerHold
+        if hold then
+            if hold.camera then
+                local cam=workspace.CurrentCamera
+                if cam~=hold.camera or M.Blocked() or not M.CanDragCamera(cam) or Input.MouseBehavior~=Enum.MouseBehavior.LockCurrentPosition then
+                    M.EndPointerHold()
+                else M.FinishLeftDrag(cam,hold) end
+            elseif hold.sawFrame then M.EndPointerHold()
+            else hold.sawFrame=true end
+        end
         if not M.running or not state.alive or not cfg.mobilador then return end
         if M.failures and (M.failures>=3 or M.retryAt and os.clock()<M.retryAt) then M.SyncModals(false);return end
         local cam=workspace.CurrentCamera
@@ -2675,18 +2811,28 @@ do
     end
     function M.OnBegan(input,processed)
         if not M.running or not state.alive or M.Blocked() then return end
-        -- Left click belongs entirely to the game; it must never start or clear capture.
+        -- The original click always reaches the game; an optional world drag controls only the third-person view.
         if input.UserInputType==Enum.UserInputType.MouseButton1 then
+            if cfg.mobiladorPcGestures and not M.leftDown then
+                if M.pointerHold then M.EndPointerHold() end
+                if not processed and Input.MouseBehavior==Enum.MouseBehavior.Default and not pointerHitsUI(input) then
+                    M.BeginLeftDrag(workspace.CurrentCamera)
+                end
+            end
             M.leftDown=true;M.rightSeenDown=false;M.rightPollAfter=nil;M.rightUpSince=nil
             M.stats.leftPresses=(M.stats.leftPresses or 0)+1
             return
         end
         if input.UserInputType==Enum.UserInputType.Keyboard and (input.KeyCode==Enum.KeyCode.LeftShift or input.KeyCode==Enum.KeyCode.RightShift) then
+            M.EndPointerHold()
             if not M.shift then M.freeRequested=false;M.ResetMotion() end
             M.stats.shiftEvents=(M.stats.shiftEvents or 0)+1;return
         end
         -- Native camera/aim bindings can mark real mouse input as processed, too.
-        if processed and input.UserInputType==Enum.UserInputType.MouseButton2 and pointerHitsUI(input) then return end
+        if input.UserInputType==Enum.UserInputType.MouseButton2 then
+            if M.pointerHold then M.EndPointerHold() end
+            if processed and pointerHitsUI(input) then return end
+        end
         if input.UserInputType==Enum.UserInputType.MouseButton2 then
             if cfg.mobiladorManual or cfg.mobiladorRightMode=="Desligado" then return end
             M.seenMouse=true
@@ -2698,15 +2844,21 @@ do
             and input.KeyCode==Enum.KeyCode[cfg.mobiladorShiftKey] then
             local now=os.clock();M.PollKey(now)
             if M.keyDown then return end
+            M.EndPointerHold()
             M.keyDown=true;M.keySeenDown=false;M.keyPressedAt=now;M.lastKeyToggleAt=now
             M.shift=not M.shift;M.freeRequested=not M.shift;M.capturePulse=M.shift or nil
-            if not M.shift then M.freeNativeValue,M.freeNativeKnown=M.NativeLock() end
-            if not M.shift then M.ReturnToGame() end
+            if M.shift then
+                M.lastVCapture={startMoves=M.stats.nonzero,startTurns=M.stats.customLookFrames or 0}
+            else
+                M.freeNativeValue,M.freeNativeKnown=M.NativeLock()
+                M.ReturnToGame(cfg.mobiladorPcGestures)
+            end
             M.ResetMotion()
         end
     end
     function M.OnEnded(input)
         if input.UserInputType==Enum.UserInputType.MouseButton1 then
+            if M.pointerHold and M.pointerHold.camera then M.ReleaseLeftDrag() end
             M.leftDown=false;M.rightSeenDown=false;M.rightPollAfter=os.clock()+0.12;M.rightUpSince=nil
             return
         end
@@ -2721,7 +2873,8 @@ do
         local stats=M.stats;stats.moves=stats.moves+1;stats.dx=x;stats.dy=y
         if x~=0 or y~=0 then stats.nonzero=stats.nonzero+1;M.phaseMoves=(M.phaseMoves or 0)+1 end
         stats.maxDelta=math.max(stats.maxDelta,math.abs(x),math.abs(y))
-        if cfg.mobiladorDirectLook and not M.ExplicitFree() and (M.WantsCapture() or M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter) then
+        local dragging=M.pointerHold and M.pointerHold.camera
+        if dragging or cfg.mobiladorDirectLook and not M.ExplicitFree() and (M.WantsCapture() or M.nativeLocked or Input.MouseBehavior==Enum.MouseBehavior.LockCenter) then
             M.lookDX=(M.lookDX or 0)+x;M.lookDY=(M.lookDY or 0)+y
             M.mouseSample=true;M.relativeSample=M.relativeSample or x~=0 or y~=0;M.motionAt=os.clock()
         end
@@ -2742,6 +2895,7 @@ do
     function M.Configure()
         if M.resolvingKeys then return end
         if not state.alive or not cfg.mobilador then M.Stop();return end
+        if not cfg.mobiladorPcGestures then M.EndPointerHold() end
         if cfg.unlockMouse then set("unlockMouse",false,true) end
         M.resolvingKeys=true
         for _,entry in ipairs({{"mobiladorShiftKey",{"V","LeftControl","CapsLock","RightControl"}},
@@ -2772,7 +2926,7 @@ do
         M.ResetMotion();M.FindNativeCamera()
         local menuOK,opened=pcall(function() return GuiService and GuiService.MenuIsOpen end)
         M.menuOpen=menuOK and opened==true or false
-        M.seenMouse=false;M.events={};M.stats={moves=0,nonzero=0,maxDelta=0}
+        M.seenMouse=false;M.events={};M.lastVCapture=nil;M.stats={moves=0,nonzero=0,maxDelta=0}
         M.connections={Input.InputBegan:Connect(M.OnBegan),Input.InputEnded:Connect(M.OnEnded),Input.InputChanged:Connect(M.OnChanged),
             Input.WindowFocusReleased:Connect(function() M.focused=false;M.ClearPresses(false);M.target=nil;M.ReleaseAll() end),
             Input.WindowFocused:Connect(function() M.focused=true;M.ClearPresses(false);M.target=nil end),
@@ -2803,7 +2957,7 @@ do
             requested=M.target and enumName(M.target) or "none",cameraType=cam and enumName(cam.CameraType) or "none",
             firstPerson=M.first,shift=M.shift,rightHeld=M.rightHeld,rightToggle=M.rightToggle,rightMode=cfg.mobiladorRightMode,
             sensitivity=Input.MouseDeltaSensitivity,delta=gotDelta and delta or nil,
-            stats=stats,transitions=events,lastError=M.lastError,rightButtonReadback=gotButton and rightDown or false,
+            stats=stats,transitions=events,lastVCapture=M.lastVCapture,lastError=M.lastError,rightButtonReadback=gotButton and rightDown or false,
             leftDown=M.leftDown,manualOnly=cfg.mobiladorManual,captureKey=cfg.mobiladorShiftKey,
             markerEnabled=markerGui.Enabled,markerSize=cfg.mobiladorReticleSize,markerStyle=cfg.mobiladorReticleStyle,
             customImageLoaded=image.IsLoaded==true,cursorScope=cfg.mobiladorCursorScope,cursorFailures=M.cursorFailures,cursorSuspended=M.cursorFault==true,
@@ -2817,7 +2971,7 @@ do
             lookPending={M.lookDX or 0,M.lookDY or 0}}
     end
     for _,key in ipairs({"mobilador","mobiladorShift","mobiladorShiftKey","mobiladorRightMode","mobiladorRecoverKey",
-        "mobiladorCustomCamera","mobiladorFixedSensitivity","mobiladorSensitivity","mobiladorManual","mobiladorDirectLook","mobiladorLookSpeed"}) do actions[key]=M.Configure end
+        "mobiladorCustomCamera","mobiladorFixedSensitivity","mobiladorSensitivity","mobiladorManual","mobiladorDirectLook","mobiladorLookSpeed","mobiladorPcGestures"}) do actions[key]=M.Configure end
     for _,key in ipairs({"mobiladorReticle","mobiladorReticleSize","mobiladorReticleStyle","mobiladorReticleColor",
         "mobiladorReticleThickness","mobiladorReticleGap","mobiladorReticleOpacity","mobiladorReticleImage","mobiladorCursorScope"}) do
         actions[key]=function() M.markerDirty=true;M.cursorFailures=0;M.cursorFault=nil;M.UpdateCursor() end

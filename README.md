@@ -1,6 +1,16 @@
 # Huss Valley Panel
 
-Versão 0.6.35 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.36 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Gestos de mouse do PC na versão 0.6.36
+
+Ative **World → Mobilador / mouse → Gestos de mouse do PC**. A opção começa desligada, inclusive em perfis de versões anteriores.
+
+Com a câmera em terceira pessoa e o cursor livre, segure o **botão esquerdo** sobre o cenário e arraste. O painel pede ao Roblox que prenda o ponteiro no ponto do clique enquanto a câmera gira ao redor do personagem. Soltar o botão libera o ponteiro ali. Um clique curto continua chegando ao jogo. O gesto usa as câmeras `Custom` e `Follow` do personagem e respeita o giro que o próprio jogo aplicar durante o quadro.
+
+O primeiro **V** prende no centro. O segundo pede ao Roblox que fixe a posição atual por um quadro antes de liberar o ponteiro. No Android, a posição física ao sair da captura depende do cliente e do adaptador. O cursor livre acompanha a coordenada real informada pelo Roblox, inclusive quando o aparelho restaura a posição anterior.
+
+Se a câmera continuar parada ao mover o mouse com **V** ativo, abra o painel e use **Copiar diagnostico do mouse**. O campo `lastVCapture` guarda o modo da câmera e os movimentos observados durante a última captura, mesmo depois de abrir o menu.
 
 ## Mouse em câmeras de jogos de tiro na versão 0.6.35
 
