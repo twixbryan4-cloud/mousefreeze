@@ -1,6 +1,14 @@
 # Huss Valley Panel
 
-Versão 0.6.36 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.37 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Soltura do mouse e arrasto em terceira pessoa na versão 0.6.37
+
+O segundo **V** libera o ponteiro no próprio evento da tecla. Se a câmera voltar a prendê-lo enquanto o mouse está livre e sem um gesto em andamento, o painel pede a soltura de novo. Uma nova pressão de **V** captura o mouse. O **Shift Lock** e os gestos de câmera iniciados pelo jogador continuam disponíveis. Com **Gestos de mouse do PC** ligado, o painel ainda tenta usar o centro como ponto de partida. A posição final do ponteiro físico depende do cliente.
+
+Com **World → Mobilador / mouse → Gestos de mouse do PC** ligado, segure o **esquerdo** sobre o cenário em terceira pessoa. Se o jogo iniciar o arrasto e já prender o ponteiro, o painel respeita a soltura do próprio jogo. Se o painel iniciar a trava e a câmera a desfizer durante o arrasto, ele volta a pedi-la enquanto o botão estiver apertado. Ao soltar, o ponteiro volta ao modo livre. O painel também reconhece o fim ou o cancelamento da pressão caso perca o evento normal de soltura.
+
+Na borda, o arrasto aproveita o deslocamento relativo que o Roblox ainda informar pelo evento do mouse ou por uma nova leitura do quadro. Um adaptador que só informe a posição absoluta pode parar de fornecer movimento ao atingir a borda. Alguns clientes também podem mostrar o ponteiro parado e liberar o mouse em outra posição. Em **Copiar diagnostico do mouse**, `lastPcDrag.releaseDX` e `releaseDY` registram o deslocamento em pixels quando o painel consegue observar a soltura. Um valor horizontal positivo indica um salto para a direita. O cursor livre usa a posição que recebe os cliques.
 
 ## Gestos de mouse do PC na versão 0.6.36
 
