@@ -1,14 +1,14 @@
 # Huss Valley Panel
 
-Versão 0.6.39 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.40 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
 
-## Cursor alternativo e terceira pessoa na versão 0.6.39
+## Cursor e terceira pessoa na versão 0.6.40
 
-Em **World → Mobilador / mouse → Modo do cursor**, o perfil começa em **Normal**. Um toque em **V** prende o cursor e outro o solta. Para experimentar o **Alternativo**, ligue o Mobilador, selecione o modo e feche o painel. Segure **V** e mova o mouse. Se o adaptador enviar movimentos de toque, segure a tecla e comece o arrasto na metade direita da tela, fora dos controles. Ao soltar a tecla, o painel encerra a captura. Uma tecla de captura personalizada funciona nos dois modos.
+Em **World → Mobilador / mouse → Modo do cursor**, **Normal** e **Alternativo** usam a mesma tecla de captura. Com a configuração padrão, aperte **V** uma vez para prender o mouse e aperte outra vez para soltá-lo. Você pode soltar a tecla entre os dois toques. Trocar de modo encerra a captura anterior. A tecla personalizada, as opções do botão direito e a sensibilidade continuam no mesmo cartão.
 
-O Alternativo usa o movimento que o Roblox entrega ao cliente. Ele acompanha a câmera padrão do personagem e só acrescenta giro quando ela deixou de aplicar aquele movimento. **Sensibilidade da captura** ajusta esse giro. Abrir o menu, digitar ou trocar a câmera interrompe a captura. **Copiar diagnostico do mouse** registra a entrada observada na última captura e quantos giros vieram do jogo e do painel.
+No **Alternativo**, o Roblox também recebe a captura do mouse quando a experiência usa uma câmera personalizada. Nesse caso, o giro depende de como o jogo trata o movimento real do mouse. Para uma câmera padrão que acompanha o seu personagem, o painel também consegue aplicar movimento que ela deixou de usar. O arrasto por toque segue o controle do próprio jogo. **Copiar diagnostico do mouse** guarda a quantidade de movimentos recebidos, os quadros em que a câmera girou e os giros acrescentados pelo painel.
 
-Em **World → Camera → Terceira pessoa**, o painel pede à câmera clássica uma distância inicial de pelo menos 8 studs, até o limite permitido pelo jogo. Logo depois libera o zoom para você aproximar ou afastar a câmera. A preferência volta a ser aplicada quando a câmera do personagem retorna após uma cena. Se o jogo impõe primeira pessoa, restringe o zoom a menos de 2 studs ou usa uma câmera própria, a opção mostra a condição no cartão. Esse controle funciona também com o Mobilador desligado.
+Em **World → Camera → Terceira pessoa**, o painel pede zoom à câmera clássica dentro da distância que o jogo permite. Ele mede a posição da câmera em relação ao personagem e confirma a mudança depois de liberar o zoom manual. Quando o jogo trava a perspectiva, usa uma câmera própria ou o afastamento não se confirma, o motivo aparece no cartão.
 
 ## Desempenho do painel na versão 0.6.38
 
