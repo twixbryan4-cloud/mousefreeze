@@ -1,6 +1,14 @@
 # Huss Valley Panel
 
-Versão 0.6.38 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+Versão 0.6.39 do painel em Luau, inspirada no vídeo de referência. O catálogo e a categoria de facas não fazem parte deste projeto. O diagnóstico recebido confirmou o Huss Valley (place 107535308163741 / universe 10764627709) e a pasta `ReplicatedStorage.ChickenOrHero`. Os nomes dos eventos não revelam seus argumentos nem a lógica que o servidor executa.
+
+## Cursor alternativo e terceira pessoa na versão 0.6.39
+
+Em **World → Mobilador / mouse → Modo do cursor**, o perfil começa em **Normal**. Um toque em **V** prende o cursor e outro o solta. Para experimentar o **Alternativo**, ligue o Mobilador, selecione o modo e feche o painel. Segure **V** e mova o mouse. Se o adaptador enviar movimentos de toque, segure a tecla e comece o arrasto na metade direita da tela, fora dos controles. Ao soltar a tecla, o painel encerra a captura. Uma tecla de captura personalizada funciona nos dois modos.
+
+O Alternativo usa o movimento que o Roblox entrega ao cliente. Ele acompanha a câmera padrão do personagem e só acrescenta giro quando ela deixou de aplicar aquele movimento. **Sensibilidade da captura** ajusta esse giro. Abrir o menu, digitar ou trocar a câmera interrompe a captura. **Copiar diagnostico do mouse** registra a entrada observada na última captura e quantos giros vieram do jogo e do painel.
+
+Em **World → Camera → Terceira pessoa**, o painel pede à câmera clássica uma distância inicial de pelo menos 8 studs, até o limite permitido pelo jogo. Logo depois libera o zoom para você aproximar ou afastar a câmera. A preferência volta a ser aplicada quando a câmera do personagem retorna após uma cena. Se o jogo impõe primeira pessoa, restringe o zoom a menos de 2 studs ou usa uma câmera própria, a opção mostra a condição no cartão. Esse controle funciona também com o Mobilador desligado.
 
 ## Desempenho do painel na versão 0.6.38
 
